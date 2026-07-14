@@ -13,7 +13,7 @@
       color: #e0e0ff;
       font-family: 'Share Tech Mono', monospace;
       min-height: 100vh;
-      padding: 32px 16px 64px;
+      padding: 32px 16px 48px;
       background-image:
         repeating-linear-gradient(
           0deg,
@@ -48,6 +48,16 @@
       text-shadow: 0 0 8px #c060ff;
       letter-spacing: 3px;
       text-transform: uppercase;
+      animation: blink 1.6s step-end infinite;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.25; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      header p { animation: none; }
     }
 
     .divider {
@@ -57,19 +67,30 @@
       margin: 20px auto 0;
     }
 
+    .featured-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 20px;
+      max-width: 860px;
+      margin: 0 auto;
+    }
+
+    @media (max-width: 640px) {
+      .featured-grid { grid-template-columns: 1fr; }
+    }
+
     .card {
-      background: #0e0e20;
-      border: 1px solid #3a2060;
-      border-radius: 4px;
-      padding: 18px 14px;
+      background: #12102a;
+      border: 1px solid #c060ff;
+      border-radius: 6px;
       text-decoration: none;
       color: inherit;
       display: flex;
       flex-direction: column;
-      gap: 10px;
       transition: all 0.15s;
       position: relative;
       overflow: hidden;
+      box-shadow: 0 0 12px rgba(192, 96, 255, 0.2), inset 0 0 30px rgba(192, 96, 255, 0.05);
     }
 
     .card::before {
@@ -78,70 +99,105 @@
       top: 0; left: 0; right: 0;
       height: 2px;
       background: linear-gradient(to right, #c060ff, #60c0ff);
-      opacity: 0;
-      transition: opacity 0.15s;
+      z-index: 1;
     }
 
     .card:hover {
-      background: #15152a;
-      border-color: #c060ff;
-      box-shadow: 0 0 16px rgba(192, 96, 255, 0.3), inset 0 0 20px rgba(192, 96, 255, 0.05);
-      transform: translateY(-2px);
+      border-color: #e0a0ff;
+      box-shadow: 0 0 24px rgba(192, 96, 255, 0.45), inset 0 0 30px rgba(192, 96, 255, 0.08);
+      transform: translateY(-3px);
     }
 
-    .card:hover::before {
-      opacity: 1;
+    .shot {
+      display: block;
+      width: 100%;
+      aspect-ratio: 16 / 10;
+      object-fit: cover;
+      object-position: center top;
+      border-bottom: 1px solid #3a2060;
+      background: #0a0a16;
+      filter: saturate(1.05);
+    }
+
+    .shot-bottom { object-position: center bottom; }
+
+    .card-body {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 16px 16px 14px;
+      flex: 1;
+    }
+
+    .card-top {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
     }
 
     .card-name {
-      font-family: 'Share Tech Mono', monospace;
-      font-size: 0.85rem;
-      color: #e0d0ff;
+      font-family: 'Press Start 2P', monospace;
+      font-size: 0.78rem;
+      color: #fff;
+      text-shadow: 0 0 10px #c060ff;
       line-height: 1.4;
-      text-shadow: 0 0 8px rgba(192, 96, 255, 0.4);
     }
 
-    .card:hover .card-name {
-      color: #fff;
-      text-shadow: 0 0 10px #c060ff;
+    .card-tag {
+      font-size: 0.78rem;
+      color: #9a8fc0;
+      line-height: 1.45;
+      flex: 1;
     }
 
-    .featured-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-      gap: 12px;
-      max-width: 760px;
-      margin: 0 auto 32px;
+    .card-foot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 4px;
     }
 
-    .card.featured {
-      border-color: #c060ff;
-      background: #12102a;
-      box-shadow: 0 0 12px rgba(192, 96, 255, 0.2), inset 0 0 30px rgba(192, 96, 255, 0.05);
+    .play {
+      font-family: 'Press Start 2P', monospace;
+      font-size: 0.55rem;
+      color: #0a0a16;
+      background: #c060ff;
+      padding: 8px 12px;
+      border-radius: 3px;
+      letter-spacing: 1px;
+      box-shadow: 0 0 14px rgba(192, 96, 255, 0.5);
     }
 
-    .card.featured::before {
-      opacity: 1;
-    }
-
-    .card.featured .card-name {
-      color: #fff;
-      text-shadow: 0 0 10px #c060ff;
-    }
-
-    .card.featured:hover {
-      box-shadow: 0 0 24px rgba(192, 96, 255, 0.4), inset 0 0 30px rgba(192, 96, 255, 0.08);
+    .card:hover .play {
+      background: #e0a0ff;
+      box-shadow: 0 0 20px rgba(224, 160, 255, 0.7);
     }
 
     .card-date {
-      font-size: 0.6rem;
+      font-size: 0.65rem;
       color: #5a5080;
       letter-spacing: 0.5px;
-      margin-top: auto;
     }
 
-    @media (max-width: 380px) {
-      .featured-grid { grid-template-columns: 1fr 1fr; }
+    footer {
+      text-align: center;
+      margin-top: 44px;
+      font-size: 0.75rem;
+      color: #8060aa;
+      letter-spacing: 1px;
+    }
+
+    footer a {
+      color: #c060ff;
+      text-decoration: none;
+      border-bottom: 1px solid #4a2a66;
+    }
+
+    footer a:hover {
+      color: #e0a0ff;
+      text-shadow: 0 0 8px #c060ff;
     }
   </style>
 </head>
@@ -155,23 +211,64 @@
 
   <div class="featured-grid">
 
-    <a class="card featured" href="glowflow.html">
-      <div class="card-name">Glowflow</div>
+    <a class="card" href="glowflow.html">
+      <img class="shot" src="screenshots/glowflow.png" alt="Glowflow gameplay" loading="lazy">
+      <div class="card-body">
+        <div class="card-top">
+          <div class="card-name">Glowflow</div>
+        </div>
+        <div class="card-tag">Connect the dots. Every move plays music.</div>
+        <div class="card-foot">
+          <span class="play">PLAY &gt;</span>
+        </div>
+      </div>
     </a>
 
-    <a class="card featured" href="orbital-impact.html">
-      <div class="card-name">Orbital Impact</div>
+    <a class="card" href="orbital-impact.html">
+      <img class="shot" src="screenshots/orbital-impact.png" alt="Orbital Impact gameplay" loading="lazy">
+      <div class="card-body">
+        <div class="card-top">
+          <div class="card-name">Orbital Impact</div>
+        </div>
+        <div class="card-tag">Brick-breaker in orbit. Shatter every ring.</div>
+        <div class="card-foot">
+          <span class="play">PLAY &gt;</span>
+        </div>
+      </div>
     </a>
 
-    <a class="card featured" href="word-drops.html">
-      <div class="card-name">Word Drops</div>
+    <a class="card" href="word-drops.html">
+      <img class="shot shot-bottom" src="screenshots/word-drops.png" alt="Word Drops gameplay" loading="lazy">
+      <div class="card-body">
+        <div class="card-top">
+          <div class="card-name">Word Drops</div>
+        </div>
+        <div class="card-tag">Tetris, but you spell. Chains multiply.</div>
+        <div class="card-foot">
+          <span class="play">PLAY &gt;</span>
+        </div>
+      </div>
     </a>
 
-    <a class="card featured" href="chain-reaction.html">
-      <div class="card-name">Chain Reaction</div>
+    <a class="card" href="chain-reaction.html">
+      <img class="shot shot-bottom" src="screenshots/chain-reaction.png" alt="Chain Reaction gameplay" loading="lazy">
+      <div class="card-body">
+        <div class="card-top">
+          <div class="card-name">Chain Reaction</div>
+        </div>
+        <div class="card-tag">Pop connected orbs. Bigger groups, bigger booms.</div>
+        <div class="card-foot">
+          <span class="play">PLAY &gt;</span>
+        </div>
+      </div>
     </a>
 
   </div>
+
+  <footer>
+    Four games. One HTML file each. Zero dependencies.
+    <a href="https://github.com/caldwellcourtneyc/game-lab">Source on GitHub</a>
+  </footer>
 
   <script>
     // Fetch last-updated dates from GitHub API (per-file, parallel)
@@ -190,10 +287,10 @@
           if (!commit) return;
           const d = new Date(commit.commit.author.date);
           const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-          const el = document.createElement('div');
+          const el = document.createElement('span');
           el.className = 'card-date';
-          el.textContent = label;
-          card.appendChild(el);
+          el.textContent = 'updated ' + label;
+          card.querySelector('.card-foot').appendChild(el);
         });
         await Promise.all(fetches);
       } catch (e) { /* silent fail — dates are nice-to-have */ }
