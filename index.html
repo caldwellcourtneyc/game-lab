@@ -57,14 +57,6 @@
       margin: 20px auto 0;
     }
 
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-      gap: 12px;
-      max-width: 760px;
-      margin: 0 auto;
-    }
-
     .card {
       background: #0e0e20;
       border: 1px solid #3a2060;
@@ -114,44 +106,6 @@
       text-shadow: 0 0 10px #c060ff;
     }
 
-    .card-variants {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-
-    .variant-link {
-      font-family: 'Press Start 2P', monospace;
-      font-size: 0.5rem;
-      background: transparent;
-      border: 1px solid #3a2060;
-      border-radius: 2px;
-      padding: 4px 7px;
-      color: #8060aa;
-      text-decoration: none;
-      letter-spacing: 1px;
-      transition: all 0.15s;
-    }
-
-    .variant-link:hover {
-      border-color: #c060ff;
-      color: #c060ff;
-      text-shadow: 0 0 6px #c060ff;
-      box-shadow: 0 0 8px rgba(192, 96, 255, 0.3);
-    }
-
-    /* Featured section */
-    .featured-label {
-      max-width: 760px;
-      margin: 0 auto 12px;
-      font-family: 'Press Start 2P', monospace;
-      font-size: 0.6rem;
-      color: #c060ff;
-      text-shadow: 0 0 8px #c060ff;
-      letter-spacing: 3px;
-      text-transform: uppercase;
-    }
-
     .featured-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -179,13 +133,6 @@
       box-shadow: 0 0 24px rgba(192, 96, 255, 0.4), inset 0 0 30px rgba(192, 96, 255, 0.08);
     }
 
-    .section-divider {
-      width: 200px;
-      height: 1px;
-      background: linear-gradient(to right, transparent, #3a2060, transparent);
-      margin: 0 auto 24px;
-    }
-
     .card-date {
       font-size: 0.6rem;
       color: #5a5080;
@@ -194,7 +141,6 @@
     }
 
     @media (max-width: 380px) {
-      .grid { grid-template-columns: 1fr 1fr; }
       .featured-grid { grid-template-columns: 1fr 1fr; }
     }
   </style>
