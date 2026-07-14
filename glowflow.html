@@ -1,0 +1,3275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>GLOWFLOW</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #1a1a2e;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    color: #e0e0e0;
+    user-select: none;
+    -webkit-user-select: none;
+    overflow-x: hidden;
+  }
+
+  .container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 20px 16px;
+  }
+
+  h1 {
+    font-size: 2.4rem;
+    font-weight: 300;
+    letter-spacing: 0.5em;
+    margin-bottom: 6px;
+    color: #e0e0e0;
+    text-indent: 0.5em;
+  }
+
+  .controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .difficulty-btn {
+    padding: 7px 18px;
+    border: 1px solid #334;
+    border-radius: 6px;
+    background: transparent;
+    color: #aab;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+  }
+  .difficulty-btn:hover {
+    border-color: #e94560;
+    color: #e94560;
+  }
+  .difficulty-btn.active {
+    background: #e94560;
+    border-color: #e94560;
+    color: #fff;
+  }
+
+  .new-game-btn, .help-btn {
+    padding: 7px 18px;
+    border: 1px solid #334;
+    border-radius: 6px;
+    background: transparent;
+    color: #aab;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+  }
+  .new-game-btn { background: #0f3460; border: none; color: #e0e0e0; }
+  .new-game-btn:hover { background: #16508a; }
+  .help-btn:hover { border-color: #e94560; color: #e94560; }
+
+  .info-bar {
+    display: flex;
+    gap: 24px;
+    align-items: center;
+    margin-bottom: 14px;
+    font-size: 0.9rem;
+    color: #8899aa;
+  }
+  #levelDisplay { color: #e94560; font-weight: 600; letter-spacing: 0.04em; }
+  .timer { font-variant-numeric: tabular-nums; min-width: 50px; }
+
+  #grid-wrapper {
+    position: relative;
+    padding: 8px;
+    background: #0d1525;
+    border-radius: 10px;
+    box-shadow: 0 4px 30px rgba(0,0,0,0.6);
+  }
+
+  #grid {
+    display: grid;
+    gap: 2px;
+  }
+
+  .cell {
+    position: relative;
+    background: #141e33;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.1s;
+    border: 1px solid #1a2844;
+  }
+  .cell:hover { background: #1a2844; }
+  .cell.path-cell { background: transparent; }
+
+  /* Canvas for path rendering */
+  #path-canvas {
+    position: absolute;
+    top: 8px; left: 8px;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  /* Dots sit above canvas */
+  .dot {
+    position: absolute;
+    width: 60%;
+    height: 60%;
+    border-radius: 50%;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 4;
+    pointer-events: none;
+    border: 2px solid rgba(255,255,255,0.3);
+    animation: dotPulse 2s ease-in-out infinite;
+  }
+
+  @keyframes dotPulse {
+    0%, 100% { transform: translate(-50%, -50%) scale(1); }
+    50% { transform: translate(-50%, -50%) scale(1.08); }
+  }
+
+  /* Win overlay */
+  .win-overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(26, 26, 46, 0.92);
+    z-index: 100;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.4s;
+  }
+  .win-overlay.show { opacity: 1; pointer-events: auto; }
+  .win-overlay h2 {
+    font-size: 3rem;
+    font-weight: 300;
+    letter-spacing: 0.3em;
+    text-indent: 0.3em;
+    color: #00ffcc;
+    margin-bottom: 12px;
+    text-shadow: 0 0 20px #00ffcc66, 0 0 40px #00ffcc22;
+  }
+  .win-overlay p {
+    font-size: 1.1rem;
+    color: #8899aa;
+    margin-bottom: 24px;
+  }
+
+  /* Game over overlay */
+  .gameover-overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(26, 26, 46, 0.92);
+    z-index: 100;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.4s;
+  }
+  .gameover-overlay.show { opacity: 1; pointer-events: auto; }
+  .gameover-overlay h2 {
+    font-size: 3rem;
+    font-weight: 300;
+    letter-spacing: 0.3em;
+    text-indent: 0.3em;
+    color: #e94560;
+    margin-bottom: 12px;
+    text-shadow: 0 0 20px #e9456066, 0 0 40px #e9456022;
+  }
+  .gameover-overlay p {
+    font-size: 1.1rem;
+    color: #8899aa;
+    margin-bottom: 24px;
+  }
+
+  /* Help overlay */
+  .help-overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(26, 26, 46, 0.94);
+    z-index: 100;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s;
+    padding: 20px;
+  }
+  .help-overlay.show { opacity: 1; pointer-events: auto; }
+  .help-content {
+    background: #16213e;
+    border-radius: 14px;
+    padding: 32px 28px;
+    max-width: 440px;
+    width: 100%;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+  }
+  .help-content h2 {
+    font-size: 1.4rem;
+    font-weight: 400;
+    letter-spacing: 0.15em;
+    color: #e94560;
+    margin-bottom: 18px;
+  }
+  .help-intro {
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: #b0bec5;
+    margin-bottom: 14px;
+  }
+  .help-intro strong { color: #e0e0e0; }
+  .help-example {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin: 16px 0;
+    padding: 16px;
+    background: #0d1525;
+    border-radius: 10px;
+  }
+  #helpCanvas {
+    border-radius: 6px;
+  }
+  .help-example-label {
+    font-size: 0.78rem;
+    color: #667788;
+    margin-top: 10px;
+    letter-spacing: 0.04em;
+  }
+  .help-rules {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 14px 0;
+  }
+  .help-rule {
+    font-size: 0.88rem;
+    color: #8899aa;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .help-rule strong { color: #c8d6e5; }
+  .help-rule-num {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: rgba(233,69,96,0.15);
+    color: #e94560;
+    font-size: 0.72rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .help-tips {
+    margin: 14px 0 6px;
+    padding: 12px 14px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 8px;
+    border: 1px solid #1a2844;
+  }
+  .help-tip {
+    font-size: 0.82rem;
+    color: #667788;
+    padding: 3px 0;
+  }
+  .help-tip strong { color: #8899aa; }
+  .help-close-btn {
+    margin-top: 8px;
+    padding: 9px 28px;
+    border: none;
+    border-radius: 6px;
+    background: #e94560;
+    color: #fff;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: background 0.2s;
+    font-family: inherit;
+  }
+  .help-close-btn:hover { background: #f05575; }
+
+
+  /* Settings overlay */
+  .settings-overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(26, 26, 46, 0.94);
+    z-index: 100;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s;
+    padding: 20px;
+  }
+  .settings-overlay.show { opacity: 1; pointer-events: auto; }
+  .settings-content {
+    background: #16213e;
+    border-radius: 14px;
+    padding: 32px 28px;
+    max-width: 360px;
+    width: 90vw;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+  }
+  .settings-content h2 {
+    font-size: 1.4rem;
+    font-weight: 400;
+    letter-spacing: 0.15em;
+    color: #e94560;
+    margin-bottom: 6px;
+  }
+  .settings-section-label {
+    font-size: 0.78rem;
+    color: #667788;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+  .palette-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 18px;
+  }
+  .palette-row {
+    display: flex;
+    align-items: center;
+    padding: 10px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+    border: 1px solid transparent;
+    position: relative;
+  }
+  .palette-row:hover { background: rgba(255,255,255,0.04); }
+  .palette-row.selected {
+    background: rgba(233,69,96,0.08);
+    border-left: 3px solid #e94560;
+    padding-left: 9px;
+  }
+  .palette-info {
+    flex: 1;
+  }
+  .palette-name {
+    font-size: 0.95rem;
+    color: #e0e0e0;
+    font-weight: 500;
+  }
+  .palette-desc {
+    font-size: 0.76rem;
+    color: #667788;
+    margin-top: 2px;
+  }
+  .palette-preview-btn {
+    width: 32px; height: 32px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.06);
+    color: #8899aa;
+    font-size: 1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, color 0.15s;
+    flex-shrink: 0;
+    margin-left: 8px;
+  }
+  .palette-preview-btn:hover { background: rgba(255,255,255,0.12); color: #e0e0e0; }
+  .settings-close-btn {
+    margin-top: 4px;
+    padding: 9px 28px;
+    border: none;
+    border-radius: 6px;
+    background: #e94560;
+    color: #fff;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: background 0.2s;
+    font-family: inherit;
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .settings-close-btn:hover { background: #f05575; }
+
+  @media (max-width: 500px) {
+    h1 { font-size: 1.8rem; }
+    .controls { gap: 6px; }
+    .difficulty-btn, .new-game-btn, .help-btn { padding: 8px 12px; font-size: 0.78rem; min-height: 40px; }
+    .info-bar { gap: 14px; font-size: 0.82rem; }
+  }
+
+  /* Blocked-move shake + red pulse */
+  @keyframes gridShake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-5px); }
+    40% { transform: translateX(5px); }
+    60% { transform: translateX(-3px); }
+    80% { transform: translateX(3px); }
+  }
+  #grid-wrapper.shake { animation: gridShake 0.28s ease; }
+  #grid-wrapper.blocked-pulse { box-shadow: 0 4px 30px rgba(0,0,0,0.6), 0 0 0 2px #e9456088, 0 0 24px #e9456055; }
+
+  /* Sound button label */
+  .btn-label { font-size: 0.85rem; }
+  @media (max-width: 500px) { .btn-label { display: none; } }
+
+  /* Win stats line */
+  .win-stats {
+    font-size: 0.82rem;
+    color: #667788;
+    margin-bottom: 20px;
+    letter-spacing: 0.03em;
+    text-align: center;
+    line-height: 1.6;
+  }
+  .win-stats strong { color: #8899aa; font-weight: 600; }
+  .win-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .win-secondary-btn {
+    padding: 7px 18px;
+    border: 1px solid #334;
+    border-radius: 6px;
+    background: transparent;
+    color: #aab;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+    min-height: 40px;
+  }
+  .win-secondary-btn:hover { border-color: #00ffcc; color: #00ffcc; }
+
+  /* Challenge-mode toggle in settings */
+  .settings-toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 12px;
+    border-radius: 8px;
+    border: 1px solid #1a2844;
+    margin-bottom: 6px;
+    cursor: pointer;
+  }
+  .settings-toggle-row:hover { background: rgba(255,255,255,0.03); }
+  .settings-toggle-info { flex: 1; }
+  .settings-toggle-name { font-size: 0.95rem; color: #e0e0e0; font-weight: 500; }
+  .settings-toggle-desc { font-size: 0.76rem; color: #667788; margin-top: 2px; max-width: 240px; }
+  .settings-toggle-switch {
+    width: 44px; height: 26px;
+    border-radius: 13px;
+    background: #2a3a5c;
+    position: relative;
+    flex-shrink: 0;
+    transition: background 0.2s;
+  }
+  .settings-toggle-switch::after {
+    content: '';
+    position: absolute;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: #e0e0e0;
+    top: 3px; left: 3px;
+    transition: left 0.2s;
+  }
+  .settings-toggle-row.on .settings-toggle-switch { background: #e94560; }
+  .settings-toggle-row.on .settings-toggle-switch::after { left: 21px; }
+
+  /* Sound Tuner Panel */
+  .tuner-toggle {
+    display: none;
+    padding: 7px 12px;
+    border: 1px solid #334;
+    border-radius: 6px;
+    background: transparent;
+    color: #aab;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+  }
+  .tuner-toggle:hover { border-color: #e94560; color: #e94560; }
+  .tuner-toggle.visible { display: inline-flex; }
+
+  .tuner-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 10, 20, 0.6);
+    z-index: 200;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s;
+  }
+  .tuner-backdrop.show { opacity: 1; pointer-events: auto; }
+
+  .tuner-panel {
+    position: fixed;
+    top: 0;
+    right: -380px;
+    width: 360px;
+    max-width: 92vw;
+    height: 100vh;
+    background: #16213e;
+    z-index: 201;
+    transition: right 0.3s ease;
+    display: flex;
+    flex-direction: column;
+    box-shadow: -4px 0 30px rgba(0,0,0,0.5);
+  }
+  .tuner-panel.show { right: 0; }
+
+  .tuner-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 18px 12px;
+    border-bottom: 1px solid #1a2844;
+    flex-shrink: 0;
+  }
+  .tuner-header h3 {
+    font-size: 1.1rem;
+    font-weight: 400;
+    letter-spacing: 0.12em;
+    color: #e94560;
+    margin: 0;
+  }
+  .tuner-close {
+    width: 36px; height: 36px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.06);
+    color: #8899aa;
+    font-size: 1.2rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .tuner-close:hover { background: rgba(255,255,255,0.12); color: #e0e0e0; }
+
+  .tuner-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px 18px 100px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tuner-section-label {
+    font-size: 0.75rem;
+    color: #667788;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    margin-top: 14px;
+  }
+  .tuner-section-label:first-child { margin-top: 0; }
+
+  .tuner-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 14px;
+  }
+  .tuner-chip {
+    padding: 8px 14px;
+    border-radius: 20px;
+    border: 1px solid #2a3a5c;
+    background: transparent;
+    color: #8899aa;
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+  .tuner-chip:hover { border-color: #4a5a7c; color: #c0c8d0; }
+  .tuner-chip.active {
+    border-color: #e94560;
+    color: #fff;
+    background: rgba(233,69,96,0.15);
+    box-shadow: 0 0 12px rgba(233,69,96,0.2);
+  }
+  .tuner-chip.custom-preset {
+    border-style: dashed;
+  }
+  .tuner-chip.custom-preset.active {
+    border-style: solid;
+  }
+
+  .tuner-group {
+    margin-bottom: 12px;
+    border: 1px solid #1a2844;
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .tuner-group-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    cursor: pointer;
+    background: rgba(255,255,255,0.02);
+    min-height: 44px;
+  }
+  .tuner-group-header:hover { background: rgba(255,255,255,0.04); }
+  .tuner-group-title {
+    font-size: 0.88rem;
+    color: #b0bec5;
+    font-weight: 500;
+  }
+  .tuner-group-test {
+    padding: 6px 12px;
+    border: 1px solid #334;
+    border-radius: 4px;
+    background: transparent;
+    color: #8899aa;
+    font-size: 0.75rem;
+    cursor: pointer;
+    font-family: inherit;
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .tuner-group-test:hover { border-color: #e94560; color: #e94560; }
+
+  .tuner-group-body {
+    padding: 6px 14px 10px;
+  }
+  .tuner-group-body.collapsed { display: none; }
+
+  .tuner-slider-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 8px 0;
+  }
+  .tuner-slider-label {
+    font-size: 0.78rem;
+    color: #667788;
+    min-width: 90px;
+    flex-shrink: 0;
+  }
+  .tuner-slider-row input[type="range"] {
+    flex: 1;
+    height: 6px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: #1a2844;
+    border-radius: 3px;
+    outline: none;
+    min-height: 44px;
+  }
+  .tuner-slider-row input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: #e94560;
+    cursor: pointer;
+    box-shadow: 0 0 6px rgba(233,69,96,0.4);
+  }
+  .tuner-slider-row input[type="range"]::-moz-range-thumb {
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: #e94560;
+    cursor: pointer;
+    border: none;
+  }
+  .tuner-slider-val {
+    font-size: 0.78rem;
+    color: #aab;
+    min-width: 40px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tuner-actions {
+    position: fixed;
+    bottom: 0;
+    right: 0;
+    width: 360px;
+    max-width: 92vw;
+    padding: 12px 18px;
+    background: #16213e;
+    border-top: 1px solid #1a2844;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    z-index: 202;
+    transform: translateX(100%);
+    transition: transform 0.3s ease;
+  }
+  .tuner-panel.show ~ .tuner-actions { transform: translateX(0); }
+
+  .tuner-action-btn {
+    padding: 10px 16px;
+    border: 1px solid #334;
+    border-radius: 6px;
+    background: transparent;
+    color: #aab;
+    font-size: 0.82rem;
+    cursor: pointer;
+    font-family: inherit;
+    min-height: 44px;
+    transition: all 0.2s;
+  }
+  .tuner-action-btn:hover { border-color: #e94560; color: #e94560; }
+  .tuner-action-btn.primary {
+    background: #e94560;
+    border-color: #e94560;
+    color: #fff;
+  }
+  .tuner-action-btn.primary:hover { background: #f05575; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>GLOWFLOW</h1>
+  <div class="controls">
+    <button class="difficulty-btn active" data-diff="easy">Easy</button>
+    <button class="difficulty-btn" data-diff="medium">Medium</button>
+    <button class="difficulty-btn" data-diff="hard">Hard</button>
+    <button class="difficulty-btn" id="dailyBtn" title="Today's daily puzzle">Daily</button>
+    <button class="new-game-btn" id="newGameBtn">New Puzzle</button>
+    <button class="help-btn" id="helpBtn">How to Play</button>
+    <button class="help-btn" id="soundBtn" title="Toggle sound" aria-label="Toggle sound on or off">🔊</button>
+    <button class="help-btn" id="vibeBtn" title="Sound palette" aria-label="Choose sound palette">🎵 <span class="btn-label">Sound</span></button>
+    <button class="tuner-toggle" id="tunerToggle" title="Sound tuner" aria-label="Open sound tuner">🎛️</button>
+  </div>
+  <div class="info-bar">
+    <span id="levelDisplay">Lv 1</span>
+    <span class="timer" id="timer">0:00</span>
+    <span id="flowCounter">0 / 0 flows</span>
+    <span id="redrawCounter" style="display:none;"></span>
+  </div>
+  <div id="grid-wrapper">
+    <div id="grid"></div>
+    <canvas id="path-canvas"></canvas>
+  </div>
+</div>
+
+<div class="win-overlay" id="winOverlay">
+  <h2 id="winTitle">SOLVED</h2>
+  <p id="winPerfect" style="display:none; font-size:1.3rem; color:#FFD700; text-shadow: 0 0 16px #FFD70066; margin-bottom:4px; letter-spacing:0.15em;">PERFECT FLOW</p>
+  <p id="winText">Completed in 0:00</p>
+  <div class="win-stats" id="winStats"></div>
+  <div class="win-actions">
+    <button class="new-game-btn" id="winNewGame">Next Puzzle</button>
+    <button class="win-secondary-btn" id="winReplay">&#9654; Replay melody</button>
+    <button class="win-secondary-btn" id="winShare">Share</button>
+  </div>
+</div>
+
+<div class="gameover-overlay" id="gameOverOverlay">
+  <h2>OUT OF REDRAWS</h2>
+  <p id="gameOverText">No redraws remaining</p>
+  <button class="new-game-btn" id="retryBtn">Try Again</button>
+</div>
+
+<div class="help-overlay" id="helpOverlay">
+  <div class="help-content">
+    <h2>HOW TO PLAY</h2>
+    <p class="help-intro">Connect each pair of matching colored dots. Fill every cell to win.</p>
+
+    <div class="help-example">
+      <canvas id="helpCanvas"></canvas>
+      <div class="help-example-label">Solved 5×5 puzzle — 4 colors, all cells filled</div>
+    </div>
+
+    <div class="help-rules">
+      <div class="help-rule"><span class="help-rule-num">1</span> Tap a <strong>dot</strong> and drag to draw a path</div>
+      <div class="help-rule"><span class="help-rule-num">2</span> Connect to the <strong>matching dot</strong> to complete a flow</div>
+      <div class="help-rule"><span class="help-rule-num">3</span> Paths go <strong>horizontal/vertical</strong> only — no diagonals</div>
+      <div class="help-rule"><span class="help-rule-num">4</span> Paths <strong>cannot cross</strong> each other</div>
+    </div>
+
+    <div class="help-tips">
+      <div class="help-tip" id="helpRedoTip"><strong>Redo a path:</strong> just click on it to clear and start over</div>
+      <div class="help-tip"><strong>🎵 Every move plays music</strong> — change your sound in Settings</div>
+    </div>
+
+    <button class="help-close-btn" id="helpCloseBtn">Got it</button>
+  </div>
+</div>
+
+<div class="settings-overlay" id="settingsOverlay">
+  <div class="settings-content">
+    <h2>VIBE SETTINGS</h2>
+    <div class="settings-section-label">Sound Palette</div>
+    <div class="palette-list" id="paletteList"></div>
+    <div class="settings-section-label">Mode</div>
+    <div class="settings-toggle-row" id="challengeToggle">
+      <div class="settings-toggle-info">
+        <div class="settings-toggle-name">Challenge mode</div>
+        <div class="settings-toggle-desc">Limited redraws and a fail state. Off by default — clearing paths is always free.</div>
+      </div>
+      <div class="settings-toggle-switch"></div>
+    </div>
+    <button class="settings-close-btn" id="settingsCloseBtn">Close</button>
+  </div>
+</div>
+
+
+<div class="tuner-backdrop" id="tunerBackdrop"></div>
+<div class="tuner-panel" id="tunerPanel">
+  <div class="tuner-header">
+    <h3>SOUND TUNER</h3>
+    <button class="tuner-close" id="tunerClose">&times;</button>
+  </div>
+  <div class="tuner-body" id="tunerBody"></div>
+</div>
+<div class="tuner-actions" id="tunerActions">
+  <button class="tuner-action-btn primary" id="tunerPreview">&#9654; Full Preview</button>
+  <button class="tuner-action-btn" id="tunerReset">Reset</button>
+  <button class="tuner-action-btn" id="tunerSave">Save Preset</button>
+  <button class="tuner-action-btn" id="tunerCopy">📋 Copy Params</button>
+</div>
+
+<script>
+(() => {
+  // === VIBE ENGINE START ===
+
+  // --- Shared audio utilities ---
+  const GAMELAB_MUTED = new URLSearchParams(window.location.search).has('mute');
+  let audioCtx = null;
+  let soundEnabled = true;
+
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended' && !GAMELAB_MUTED) audioCtx.resume();
+    return audioCtx;
+  }
+
+  const BOWL_NOTES = [261.6, 293.7, 329.6, 392.0, 440.0, 523.3, 587.3, 659.3, 784.0];
+
+  function colorFreq(colorIdx) {
+    return BOWL_NOTES[colorIdx % BOWL_NOTES.length];
+  }
+
+  // Master output with per-palette lowpass filter
+  function getMasterOut(paletteKey) {
+    const p = activeParams[paletteKey];
+    const ctx = getAudioCtx();
+    const freq = p.masterFilterFreq ?? 20000;
+    const q = p.masterFilterQ ?? 0.7;
+    // If filter is wide open, skip it for performance
+    if (freq >= 19000 && q <= 1.0) return ctx.destination;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = freq;
+    lp.Q.value = q;
+    lp.connect(ctx.destination);
+    return lp;
+  }
+
+  // === SOUND TUNING INFRASTRUCTURE ===
+  const PARAM_DEFS = {
+    universal: [
+      { key: 'masterFilterFreq', label: 'Brightness (Filter)', min: 200, max: 20000, step: 100, group: 'Tone' },
+      { key: 'masterFilterQ', label: 'Filter Resonance', min: 0.1, max: 8.0, step: 0.1, group: 'Tone' },
+      { key: 'attackTime', label: 'Note Attack', min: 0.001, max: 0.15, step: 0.001, group: 'Tone' },
+      { key: 'startGain', label: 'Start Tap Volume', min: 0.01, max: 0.40, step: 0.01, group: 'Volume' },
+      { key: 'cellGain', label: 'Trail Volume', min: 0.01, max: 0.30, step: 0.01, group: 'Volume' },
+      { key: 'completeGain', label: 'Completion Volume', min: 0.02, max: 0.40, step: 0.01, group: 'Volume' },
+      { key: 'winGain', label: 'Win Volume', min: 0.02, max: 0.35, step: 0.01, group: 'Volume' },
+      { key: 'blockedGain', label: 'Error Volume', min: 0.005, max: 0.15, step: 0.005, group: 'Volume' },
+      { key: 'pitchClimb', label: 'Pitch Rise / Cell', min: 0.2, max: 5.0, step: 0.1, group: 'Pitch' },
+      { key: 'pitchCap', label: 'Max Pitch Rise', min: 3, max: 36, step: 1, group: 'Pitch' },
+    ],
+    zen: [
+      { key: 'chimeGain', label: 'Chime Volume', min: 0.01, max: 0.35, step: 0.01, group: 'Texture' },
+      { key: 'chimeDuration', label: 'Chime Fade', min: 0.1, max: 5.0, step: 0.1, group: 'Texture' },
+      { key: 'bowlGain', label: 'Bowl Volume', min: 0.02, max: 0.40, step: 0.01, group: 'Texture' },
+      { key: 'bowlDuration', label: 'Bowl Resonance', min: 0.5, max: 10.0, step: 0.5, group: 'Texture' },
+      { key: 'harmonicDetune', label: 'Harmonic Warmth', min: 0.00, max: 0.10, step: 0.005, group: 'Texture' },
+      { key: 'bowlBeatHz', label: 'Bowl Beating Speed', min: 0.25, max: 8.0, step: 0.25, group: 'Texture' },
+      { key: 'harmonic2Gain', label: 'Shimmer Amount', min: 0.0, max: 0.60, step: 0.05, group: 'Texture' },
+    ],
+    playful: [
+      { key: 'strikeDecay', label: 'Hit Decay', min: 0.05, max: 1.5, step: 0.05, group: 'Texture' },
+      { key: 'filterQ', label: 'Woodiness', min: 0.5, max: 15.0, step: 0.5, group: 'Texture' },
+      { key: 'doubleStrikeEvery', label: 'Double-Tap Frequency', min: 1, max: 8, step: 1, group: 'Texture' },
+      { key: 'arpeggioSpeed', label: 'Arpeggio Speed', min: 20, max: 300, step: 10, group: 'Texture' },
+      { key: 'lastNoteGain', label: 'Arpeggio Emphasis', min: 0.02, max: 0.40, step: 0.01, group: 'Texture' },
+      { key: 'lastNoteDecay', label: 'Arpeggio Tail', min: 0.1, max: 3.0, step: 0.1, group: 'Texture' },
+    ],
+    dreamy: [
+      { key: 'musicBoxDecay', label: 'Note Fade', min: 0.1, max: 4.0, step: 0.1, group: 'Texture' },
+      { key: 'microDetune', label: 'Shimmer Width', min: 0, max: 20, step: 0.5, group: 'Texture' },
+      { key: 'inharmonicRatio', label: 'Metallic Character', min: 3.0, max: 12.0, step: 0.1, group: 'Texture' },
+      { key: 'inharmonicGain', label: 'Metallic Volume', min: 0.0, max: 0.30, step: 0.01, group: 'Texture' },
+      { key: 'harmonic3Gain', label: '3rd Harmonic', min: 0.0, max: 0.70, step: 0.05, group: 'Texture' },
+      { key: 'echoDelay', label: 'Echo Delay', min: 30, max: 800, step: 25, group: 'Texture' },
+      { key: 'echoGain', label: 'Echo Volume', min: 0.0, max: 0.60, step: 0.05, group: 'Texture' },
+    ],
+    cosmic: [
+      { key: 'pingQ', label: 'Ping Sharpness', min: 1, max: 25, step: 1, group: 'Texture' },
+      { key: 'dopplerDelay', label: 'Doppler Delay', min: 20, max: 700, step: 25, group: 'Texture' },
+      { key: 'dopplerDrop', label: 'Doppler Pitch Drop', min: 2, max: 60, step: 1, group: 'Texture' },
+      { key: 'droneAttack', label: 'Drone Swell', min: 0.05, max: 4.0, step: 0.05, group: 'Texture' },
+      { key: 'droneSustain', label: 'Drone Hold', min: 0.2, max: 8.0, step: 0.25, group: 'Texture' },
+      { key: 'droneRelease', label: 'Drone Fade', min: 0.2, max: 5.0, step: 0.25, group: 'Texture' },
+      { key: 'droneBeatHz', label: 'Drone Beating', min: 0.25, max: 10.0, step: 0.25, group: 'Texture' },
+      { key: 'subBassGain', label: 'Sub Bass Punch', min: 0.0, max: 0.25, step: 0.01, group: 'Texture' },
+      { key: 'sweepDuration', label: 'Start Sweep Time', min: 50, max: 1000, step: 50, group: 'Texture' },
+    ],
+  };
+
+  const VARIATIONS = {
+    zen: {
+      'Original': {
+        masterFilterFreq: 20000, masterFilterQ: 0.7, attackTime: 0.005,
+        startGain: 0.10, cellGain: 0.06, completeGain: 0.14, winGain: 0.10, blockedGain: 0.02,
+        pitchClimb: 1.5, pitchCap: 12,
+        chimeGain: 0.08, chimeDuration: 1.2, bowlGain: 0.12, bowlDuration: 3.0,
+        harmonicDetune: 0.01, bowlBeatHz: 1.0, harmonic2Gain: 0.15,
+      },
+      'Deep Calm': {
+        bowlDuration: 5.0, bowlBeatHz: 0.5, bowlGain: 0.15,
+        chimeDuration: 2.5, chimeGain: 0.06, cellGain: 0.04,
+        pitchClimb: 1.0, harmonicDetune: 0.02,
+      },
+      'Bright Zen': {
+        chimeDuration: 0.6, chimeGain: 0.12, harmonic2Gain: 0.30,
+        harmonicDetune: 0.03, pitchClimb: 2.0, bowlDuration: 2.0,
+        cellGain: 0.08,
+      },
+      'Whisper': {
+        startGain: 0.03, cellGain: 0.02, completeGain: 0.06,
+        chimeDuration: 0.8, bowlDuration: 4.0, bowlGain: 0.06,
+        blockedGain: 0.01, winGain: 0.06,
+      },
+    },
+    playful: {
+      'Original': {
+        masterFilterFreq: 20000, masterFilterQ: 0.7, attackTime: 0.003,
+        startGain: 0.12, cellGain: 0.08, completeGain: 0.14, winGain: 0.10, blockedGain: 0.03,
+        pitchClimb: 1.5, pitchCap: 12,
+        strikeDecay: 0.3, filterQ: 2.5, doubleStrikeEvery: 3,
+        arpeggioSpeed: 80, lastNoteGain: 0.14, lastNoteDecay: 0.8,
+      },
+      'Marimba': {
+        filterQ: 6.0, strikeDecay: 0.2, doubleStrikeEvery: 99,
+        arpeggioSpeed: 60, lastNoteDecay: 1.2, cellGain: 0.10,
+      },
+      'Rubber Band': {
+        filterQ: 1.0, strikeDecay: 0.5, doubleStrikeEvery: 2,
+        arpeggioSpeed: 120, pitchClimb: 2.5,
+      },
+      'Tack Piano': {
+        filterQ: 4.0, strikeDecay: 0.12, arpeggioSpeed: 50,
+        lastNoteDecay: 0.4, cellGain: 0.10, startGain: 0.15,
+      },
+    },
+    dreamy: {
+      'Original': {
+        masterFilterFreq: 20000, masterFilterQ: 0.7, attackTime: 0.002,
+        startGain: 0.09, cellGain: 0.06, completeGain: 0.10, winGain: 0.08, blockedGain: 0.02,
+        pitchClimb: 1.5, pitchCap: 12,
+        musicBoxDecay: 0.8, microDetune: 3.75, inharmonicRatio: 7.3,
+        inharmonicGain: 0.05, harmonic3Gain: 0.30, echoDelay: 200, echoGain: 0.20,
+      },
+      'Crystal Glass': {
+        inharmonicRatio: 9.0, inharmonicGain: 0.10, musicBoxDecay: 1.8,
+        echoGain: 0.0, microDetune: 1.0, harmonic3Gain: 0.15,
+      },
+      'Antique Music Box': {
+        microDetune: 8.0, inharmonicRatio: 6.5, inharmonicGain: 0.08,
+        echoDelay: 120, echoGain: 0.30, musicBoxDecay: 1.0,
+      },
+      'Ghost': {
+        echoDelay: 450, echoGain: 0.35, inharmonicGain: 0.02,
+        musicBoxDecay: 1.5, microDetune: 7.0, startGain: 0.05,
+        cellGain: 0.03,
+      },
+    },
+    cosmic: {
+      'Original': {
+        masterFilterFreq: 20000, masterFilterQ: 0.7, attackTime: 0.005,
+        startGain: 0.08, cellGain: 0.06, completeGain: 0.12, winGain: 0.10, blockedGain: 0.03,
+        pitchClimb: 1.5, pitchCap: 12,
+        pingQ: 8, dopplerDelay: 150, dopplerDrop: 20,
+        droneAttack: 0.5, droneSustain: 2.0, droneRelease: 1.5,
+        droneBeatHz: 2.0, subBassGain: 0.05, sweepDuration: 300,
+      },
+      'Deep Space': {
+        dopplerDrop: 35, dopplerDelay: 350, droneAttack: 1.8,
+        droneSustain: 4.0, droneRelease: 2.5, subBassGain: 0.10,
+        pingQ: 4, sweepDuration: 500,
+      },
+      'Sonar': {
+        pingQ: 14, dopplerDelay: 80, dopplerDrop: 10,
+        droneAttack: 0.15, droneSustain: 0.8, droneRelease: 0.5,
+        subBassGain: 0.02, cellGain: 0.08,
+      },
+      'Nebula': {
+        subBassGain: 0.11, droneBeatHz: 4.0, droneAttack: 1.0,
+        droneSustain: 3.5, droneRelease: 2.0, pingQ: 3,
+        dopplerDrop: 25, sweepDuration: 400,
+      },
+    },
+  };
+
+  // Active params — palettes read from this, with Original defaults
+  const activeParams = {
+    zen: { ...VARIATIONS.zen['Original'] },
+    playful: { ...VARIATIONS.playful['Original'] },
+    dreamy: { ...VARIATIONS.dreamy['Original'] },
+    cosmic: { ...VARIATIONS.cosmic['Original'] },
+  };
+  let activeVariation = { zen: 'Original', playful: 'Original', dreamy: 'Original', cosmic: 'Original' };
+
+  // --- Zen Palette (singing bowls) ---
+  const zenPalette = {
+    name: 'Zen',
+    key: 'zen',
+    desc: 'warm, meditative tones',
+
+    _playChime(freq, opts = {}) {
+      if (!soundEnabled) return;
+      const p = activeParams.zen;
+      const gain = opts.gain ?? p.chimeGain ?? 0.08;
+      const duration = opts.duration ?? p.chimeDuration ?? 1.2;
+      const atk = p.attackTime ?? 0.005;
+      const ctx = getAudioCtx();
+      const dest = getMasterOut('zen');
+      const now = ctx.currentTime;
+      const master = ctx.createGain();
+      master.gain.setValueAtTime(0, now);
+      master.gain.linearRampToValueAtTime(gain, now + atk);
+      master.gain.exponentialRampToValueAtTime(0.001, now + duration);
+      master.connect(dest);
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      osc.connect(master);
+      osc.start(now);
+      osc.stop(now + duration + 0.1);
+      const g2 = ctx.createGain();
+      g2.gain.value = 0.2;
+      g2.connect(master);
+      const osc2 = ctx.createOscillator();
+      osc2.type = 'sine';
+      osc2.frequency.value = freq * (2 + (p.harmonicDetune ?? 0.01));
+      osc2.connect(g2);
+      osc2.start(now);
+      osc2.stop(now + duration * 0.6);
+    },
+
+    _playBowl(freq, opts = {}) {
+      if (!soundEnabled) return;
+      const p = activeParams.zen;
+      const gain = opts.gain ?? p.bowlGain ?? 0.12;
+      const duration = opts.duration ?? p.bowlDuration ?? 3.0;
+      const atk = p.attackTime ?? 0.005;
+      const ctx = getAudioCtx();
+      const dest = getMasterOut('zen');
+      const now = ctx.currentTime;
+      const master = ctx.createGain();
+      master.gain.setValueAtTime(0, now);
+      master.gain.linearRampToValueAtTime(gain, now + Math.max(atk, 0.03));
+      master.gain.exponentialRampToValueAtTime(0.001, now + duration);
+      master.connect(dest);
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      osc.connect(master);
+      osc.start(now);
+      osc.stop(now + duration + 0.1);
+      const g2 = ctx.createGain();
+      g2.gain.value = 0.7;
+      g2.connect(master);
+      const osc2 = ctx.createOscillator();
+      osc2.type = 'sine';
+      osc2.frequency.value = freq + (p.bowlBeatHz ?? 1);
+      osc2.connect(g2);
+      osc2.start(now);
+      osc2.stop(now + duration + 0.1);
+      const g3 = ctx.createGain();
+      g3.gain.setValueAtTime(p.harmonic2Gain ?? 0.15, now);
+      g3.gain.exponentialRampToValueAtTime(0.001, now + duration * 0.6);
+      g3.connect(master);
+      const osc3 = ctx.createOscillator();
+      osc3.type = 'sine';
+      osc3.frequency.value = freq * 2;
+      osc3.connect(g3);
+      osc3.start(now);
+      osc3.stop(now + duration * 0.6 + 0.1);
+    },
+
+    startDraw(colorIdx) {
+      const p = activeParams.zen;
+      this._playChime(colorFreq(colorIdx), { gain: p.startGain ?? 0.1, duration: 1.5 });
+    },
+    cellEnter(colorIdx, pathLength) {
+      const p = activeParams.zen;
+      const base = colorFreq(colorIdx);
+      const semitones = Math.min(pathLength - 1, p.pitchCap ?? 12) * (p.pitchClimb ?? 1.5);
+      this._playChime(base * Math.pow(2, semitones / 12), { gain: p.cellGain ?? 0.06, duration: 0.9 });
+    },
+    backtrack(colorIdx, pathLength) {
+      const p = activeParams.zen;
+      const base = colorFreq(colorIdx);
+      const semitones = Math.min(pathLength, p.pitchCap ?? 12) * (p.pitchClimb ?? 1.5);
+      this._playChime(base * Math.pow(2, semitones / 12), { gain: 0.03, duration: 0.5 });
+    },
+    pathComplete(colorIdx) {
+      const p = activeParams.zen;
+      this._playBowl(colorFreq(colorIdx) * 0.5, { gain: p.completeGain ?? 0.14, duration: 4.0 });
+    },
+    win() {
+      if (!soundEnabled) return;
+      const p = activeParams.zen;
+      [130.8, 164.8, 196.0, 261.6].forEach((f, i) => {
+        setTimeout(() => this._playBowl(f, { gain: p.winGain ?? 0.1, duration: 5.0 }), i * 300);
+      });
+    },
+    blocked() {
+      if (!soundEnabled) return;
+      const p = activeParams.zen;
+      const ctx = getAudioCtx();
+      const dest = getMasterOut('zen');
+      const now = ctx.currentTime;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(p.blockedGain ?? 0.02, now);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+      g.connect(dest);
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = 160;
+      osc.connect(g);
+      osc.start(now);
+      osc.stop(now + 0.12);
+    },
+    preview() {
+      if (!soundEnabled) return;
+      this.startDraw(0);
+      setTimeout(() => this.cellEnter(0, 2), 400);
+      setTimeout(() => this.cellEnter(0, 4), 700);
+      setTimeout(() => this.cellEnter(0, 6), 1000);
+      setTimeout(() => this.pathComplete(0), 1400);
+    },
+  };
+
+  // --- Playful Palette (marimba) ---
+  const playfulPalette = {
+    name: 'Playful',
+    key: 'playful',
+    desc: 'woody, bouncy rhythms',
+
+    _strike(freq, opts = {}) {
+      if (!soundEnabled) return;
+      const p = activeParams.playful;
+      const gain = opts.gain ?? 0.08;
+      const decay = opts.decay ?? p.strikeDecay ?? 0.3;
+      const doubleStrike = opts.doubleStrike ?? false;
+      const q = p.filterQ ?? 2.5;
+      const atk = p.attackTime ?? 0.003;
+      const ctx = getAudioCtx();
+      const dest = getMasterOut('playful');
+      const now = ctx.currentTime;
+      const master = ctx.createGain();
+      master.gain.setValueAtTime(0, now);
+      master.gain.linearRampToValueAtTime(gain, now + atk);
+      master.gain.exponentialRampToValueAtTime(0.001, now + decay);
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = freq;
+      bp.Q.value = q;
+      bp.connect(master);
+      master.connect(dest);
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.value = freq;
+      osc.connect(bp);
+      osc.start(now);
+      osc.stop(now + decay + 0.1);
+      if (doubleStrike) {
+        const g2 = ctx.createGain();
+        g2.gain.setValueAtTime(0, now + 0.03);
+        g2.gain.linearRampToValueAtTime(gain * 0.4, now + 0.033);
+        g2.gain.exponentialRampToValueAtTime(0.001, now + 0.03 + decay * 0.7);
+        const bp2 = ctx.createBiquadFilter();
+        bp2.type = 'bandpass';
+        bp2.frequency.value = freq;
+        bp2.Q.value = q;
+        bp2.connect(g2);
+        g2.connect(dest);
+        const osc2 = ctx.createOscillator();
+        osc2.type = 'triangle';
+        osc2.frequency.value = freq;
+        osc2.connect(bp2);
+        osc2.start(now + 0.03);
+        osc2.stop(now + 0.03 + decay + 0.1);
+      }
+    },
+
+    startDraw(colorIdx) {
+      const p = activeParams.playful;
+      this._strike(colorFreq(colorIdx), { gain: p.startGain ?? 0.12, decay: 0.4 });
+    },
+    cellEnter(colorIdx, pathLength) {
+      const p = activeParams.playful;
+      const base = colorFreq(colorIdx);
+      const semitones = Math.min(pathLength - 1, p.pitchCap ?? 12) * (p.pitchClimb ?? 1.5);
+      const freq = base * Math.pow(2, semitones / 12);
+      this._strike(freq, { gain: p.cellGain ?? 0.08, decay: p.strikeDecay ?? 0.3, doubleStrike: pathLength % (p.doubleStrikeEvery ?? 3) === 0 });
+    },
+    backtrack(colorIdx, pathLength) {
+      const p = activeParams.playful;
+      const base = colorFreq(colorIdx);
+      const semitones = Math.min(pathLength, p.pitchCap ?? 12) * (p.pitchClimb ?? 1.5);
+      this._strike(base * Math.pow(2, semitones / 12), { gain: 0.04, decay: 0.2 });
+    },
+    pathComplete(colorIdx) {
+      if (!soundEnabled) return;
+      const p = activeParams.playful;
+      const base = colorFreq(colorIdx);
+      const pattern = [base * 1.5, base * 1.25, base * 1.1, base];
+      pattern.forEach((f, i) => {
+        setTimeout(() => {
+          const isLast = i === pattern.length - 1;
+          this._strike(f, { gain: isLast ? (p.lastNoteGain ?? 0.14) : (p.cellGain ?? 0.08), decay: isLast ? (p.lastNoteDecay ?? 0.8) : (p.strikeDecay ?? 0.3) });
+        }, i * (p.arpeggioSpeed ?? 80));
+      });
+    },
+    win() {
+      if (!soundEnabled) return;
+      const p = activeParams.playful;
+      const notes = [261.6, 523.3, 587.3, 659.3, 784.0, 880.0];
+      notes.forEach((f, i) => {
+        setTimeout(() => this._strike(f, { gain: p.winGain ?? 0.1, decay: 0.6 }), i * 150);
+      });
+    },
+    blocked() {
+      if (!soundEnabled) return;
+      const p = activeParams.playful;
+      const ctx = getAudioCtx();
+      const dest = getMasterOut('playful');
+      const now = ctx.currentTime;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(p.blockedGain ?? 0.03, now);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+      g.connect(dest);
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.value = 180;
+      osc.connect(g);
+      osc.start(now);
+      osc.stop(now + 0.06);
+    },
+    preview() {
+      if (!soundEnabled) return;
+      this.startDraw(1);
+      setTimeout(() => this.cellEnter(1, 2), 300);
+      setTimeout(() => this.cellEnter(1, 3), 550);
+      setTimeout(() => this.cellEnter(1, 5), 800);
+      setTimeout(() => this.pathComplete(1), 1200);
+    },
+  };
+
+  // --- Dreamy Palette (music box) ---
+  const dreamyPalette = {
+    name: 'Dreamy',
+    key: 'dreamy',
+    desc: 'delicate, crystalline melodies',
+
+    _musicBox(freq, opts = {}) {
+      if (!soundEnabled) return;
+      const p = activeParams.dreamy;
+      const gain = opts.gain ?? 0.06;
+      const decay = opts.decay ?? p.musicBoxDecay ?? 0.8;
+      const echo = opts.echo ?? false;
+      const md = p.microDetune ?? 3.75;
+      const atk = p.attackTime ?? 0.002;
+      const ctx = getAudioCtx();
+      const dest = getMasterOut('dreamy');
+      const now = ctx.currentTime;
+      const detuneCents = (Math.random() * md * 2 - md);
+      const detunedFreq = freq * Math.pow(2, detuneCents / 1200);
+      const master = ctx.createGain();
+      master.gain.setValueAtTime(0, now);
+      master.gain.linearRampToValueAtTime(gain, now + atk);
+      master.gain.exponentialRampToValueAtTime(0.001, now + decay);
+      master.connect(dest);
+      // Fundamental
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = detunedFreq;
+      osc.connect(master);
+      osc.start(now);
+      osc.stop(now + decay + 0.1);
+      // 3rd harmonic
+      const g2 = ctx.createGain();
+      g2.gain.value = p.harmonic3Gain ?? 0.3;
+      g2.connect(master);
+      const osc2 = ctx.createOscillator();
+      osc2.type = 'sine';
+      osc2.frequency.value = detunedFreq * 3;
+      osc2.connect(g2);
+      osc2.start(now);
+      osc2.stop(now + decay * 0.5);
+      // Inharmonic partial for metallic shimmer
+      const g3 = ctx.createGain();
+      g3.gain.value = p.inharmonicGain ?? 0.05;
+      g3.connect(master);
+      const osc3 = ctx.createOscillator();
+      osc3.type = 'sine';
+      osc3.frequency.value = detunedFreq * (p.inharmonicRatio ?? 7.3);
+      osc3.connect(g3);
+      osc3.start(now);
+      osc3.stop(now + decay * 0.3);
+      // Echo copy for reverb effect
+      const echoGainVal = p.echoGain ?? 0.20;
+      if (echo && echoGainVal > 0) {
+        const echoDelayS = (p.echoDelay ?? 200) / 1000;
+        const eg = ctx.createGain();
+        eg.gain.setValueAtTime(0, now + echoDelayS);
+        eg.gain.linearRampToValueAtTime(gain * echoGainVal, now + echoDelayS + 0.002);
+        eg.gain.exponentialRampToValueAtTime(0.001, now + echoDelayS + decay);
+        eg.connect(dest);
+        const eo = ctx.createOscillator();
+        eo.type = 'sine';
+        eo.frequency.value = detunedFreq;
+        eo.connect(eg);
+        eo.start(now + echoDelayS);
+        eo.stop(now + echoDelayS + decay + 0.1);
+      }
+    },
+
+    startDraw(colorIdx) {
+      const p = activeParams.dreamy;
+      this._musicBox(colorFreq(colorIdx) * 2, { gain: p.startGain ?? 0.09, decay: 1.0 });
+    },
+    cellEnter(colorIdx, pathLength) {
+      const p = activeParams.dreamy;
+      const base = colorFreq(colorIdx) * 2;
+      const semitones = Math.min(pathLength - 1, p.pitchCap ?? 12) * (p.pitchClimb ?? 1.5);
+      this._musicBox(base * Math.pow(2, semitones / 12), { gain: p.cellGain ?? 0.06, decay: 0.7 });
+    },
+    backtrack(colorIdx, pathLength) {
+      const p = activeParams.dreamy;
+      const base = colorFreq(colorIdx) * 2;
+      const semitones = Math.min(pathLength, p.pitchCap ?? 12) * (p.pitchClimb ?? 1.5);
+      this._musicBox(base * Math.pow(2, semitones / 12), { gain: 0.03, decay: 0.4 });
+    },
+    pathComplete(colorIdx) {
+      if (!soundEnabled) return;
+      const p = activeParams.dreamy;
+      const base = colorFreq(colorIdx) * 2;
+      const intervals = [1, 1.5, 1.25, 1, 0.5];
+      intervals.forEach((m, i) => {
+        setTimeout(() => {
+          const isLast = i === intervals.length - 1;
+          this._musicBox(base * m, { gain: p.completeGain ?? 0.1, decay: isLast ? 1.2 : (p.musicBoxDecay ?? 0.8), echo: true });
+        }, i * 120);
+      });
+    },
+    win() {
+      if (!soundEnabled) return;
+      const p = activeParams.dreamy;
+      const base = 523.3;
+      const melody = [1, 1.5, 1.25, 1.125, 1.5, 1.75, 2, 2.25];
+      melody.forEach((m, i) => {
+        const delay = i < 6 ? i * 200 : 6 * 200 + (i - 6) * 300;
+        setTimeout(() => {
+          this._musicBox(base * m, { gain: p.winGain ?? 0.08, decay: 1.5, echo: i >= 5 });
+        }, delay);
+      });
+    },
+    blocked() {
+      if (!soundEnabled) return;
+      const p = activeParams.dreamy;
+      const ctx = getAudioCtx();
+      const dest = getMasterOut('dreamy');
+      const now = ctx.currentTime;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(p.blockedGain ?? 0.02, now);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+      g.connect(dest);
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = 2000;
+      osc.connect(g);
+      osc.start(now);
+      osc.stop(now + 0.04);
+    },
+    preview() {
+      if (!soundEnabled) return;
+      this.startDraw(2);
+      setTimeout(() => this.cellEnter(2, 2), 350);
+      setTimeout(() => this.cellEnter(2, 4), 650);
+      setTimeout(() => this.cellEnter(2, 6), 950);
+      setTimeout(() => this.pathComplete(2), 1350);
+    },
+  };
+
+  // --- Cosmic Palette (deep space) ---
+  const cosmicPalette = {
+    name: 'Cosmic',
+    key: 'cosmic',
+    desc: 'deep, atmospheric textures',
+
+    _radarPing(freq, opts = {}) {
+      if (!soundEnabled) return;
+      const p = activeParams.cosmic;
+      const gain = opts.gain ?? 0.06;
+      const decay = opts.decay ?? 0.5;
+      const q = p.pingQ ?? 8;
+      const atk = p.attackTime ?? 0.005;
+      const dDelay = (p.dopplerDelay ?? 150) / 1000;
+      const dDrop = p.dopplerDrop ?? 20;
+      const ctx = getAudioCtx();
+      const dest = getMasterOut('cosmic');
+      const now = ctx.currentTime;
+      const master = ctx.createGain();
+      master.gain.setValueAtTime(0, now);
+      master.gain.linearRampToValueAtTime(gain, now + atk);
+      master.gain.exponentialRampToValueAtTime(0.001, now + decay);
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = freq;
+      bp.Q.value = q;
+      bp.connect(master);
+      master.connect(dest);
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      osc.connect(bp);
+      osc.start(now);
+      osc.stop(now + decay + 0.1);
+      // Doppler delay tail
+      const dg = ctx.createGain();
+      dg.gain.setValueAtTime(0, now + dDelay);
+      dg.gain.linearRampToValueAtTime(gain * 0.3, now + dDelay + 0.005);
+      dg.gain.exponentialRampToValueAtTime(0.001, now + dDelay + decay * 0.8);
+      dg.connect(dest);
+      const dosc = ctx.createOscillator();
+      dosc.type = 'sine';
+      dosc.frequency.value = freq * Math.pow(2, -dDrop / 1200);
+      dosc.connect(dg);
+      dosc.start(now + dDelay);
+      dosc.stop(now + dDelay + decay + 0.1);
+    },
+
+    _drone(freq, opts = {}) {
+      if (!soundEnabled) return;
+      const p = activeParams.cosmic;
+      const gain = opts.gain ?? 0.12;
+      const attack = opts.attack ?? p.droneAttack ?? 0.5;
+      const sustain = opts.sustain ?? p.droneSustain ?? 2;
+      const release = opts.release ?? p.droneRelease ?? 1.5;
+      const beatHz = p.droneBeatHz ?? 2;
+      const ctx = getAudioCtx();
+      const dest = getMasterOut('cosmic');
+      const now = ctx.currentTime;
+      const total = attack + sustain + release;
+      const master = ctx.createGain();
+      master.gain.setValueAtTime(0, now);
+      master.gain.linearRampToValueAtTime(gain, now + attack);
+      master.gain.setValueAtTime(gain, now + attack + sustain);
+      master.gain.exponentialRampToValueAtTime(0.001, now + total);
+      master.connect(dest);
+      const osc1 = ctx.createOscillator();
+      osc1.type = 'sine';
+      osc1.frequency.value = freq;
+      osc1.connect(master);
+      osc1.start(now);
+      osc1.stop(now + total + 0.1);
+      const osc2 = ctx.createOscillator();
+      osc2.type = 'sine';
+      osc2.frequency.value = freq + beatHz;
+      osc2.connect(master);
+      osc2.start(now);
+      osc2.stop(now + total + 0.1);
+    },
+
+    _noiseBurst(opts = {}) {
+      if (!soundEnabled) return;
+      const gain = opts.gain ?? 0.03;
+      const duration = opts.duration ?? 0.08;
+      const freq = opts.freq ?? 800;
+      const ctx = getAudioCtx();
+      const dest = getMasterOut('cosmic');
+      const now = ctx.currentTime;
+      const bufSize = ctx.sampleRate * duration;
+      const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = freq;
+      bp.Q.value = 4;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(gain, now);
+      g.gain.exponentialRampToValueAtTime(0.001, now + duration);
+      src.connect(bp);
+      bp.connect(g);
+      g.connect(dest);
+      src.start(now);
+    },
+
+    startDraw(colorIdx) {
+      if (!soundEnabled) return;
+      const p = activeParams.cosmic;
+      const ctx = getAudioCtx();
+      const dest = getMasterOut('cosmic');
+      const now = ctx.currentTime;
+      const targetFreq = colorFreq(colorIdx);
+      const sweepS = (p.sweepDuration ?? 300) / 1000;
+      // Frequency sweep from 80Hz up
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, now);
+      g.gain.linearRampToValueAtTime(p.startGain ?? 0.08, now + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, now + sweepS * 2);
+      g.connect(dest);
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(80, now);
+      osc.frequency.exponentialRampToValueAtTime(targetFreq, now + sweepS);
+      osc.connect(g);
+      osc.start(now);
+      osc.stop(now + sweepS * 2 + 0.1);
+      // Sub-bass pulse
+      const sg = ctx.createGain();
+      sg.gain.setValueAtTime(p.subBassGain ?? 0.05, now);
+      sg.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+      sg.connect(dest);
+      const sosc = ctx.createOscillator();
+      sosc.type = 'sine';
+      sosc.frequency.value = 40;
+      sosc.connect(sg);
+      sosc.start(now);
+      sosc.stop(now + 0.15);
+    },
+    cellEnter(colorIdx, pathLength) {
+      const p = activeParams.cosmic;
+      const base = colorFreq(colorIdx);
+      const semitones = Math.min(pathLength - 1, p.pitchCap ?? 12) * (p.pitchClimb ?? 1.5);
+      const freq = base * Math.pow(2, semitones / 12);
+      this._radarPing(freq, { gain: p.cellGain ?? 0.06, decay: 0.5 });
+      if (pathLength % 4 === 0) {
+        this._drone(freq * 0.5, { gain: 0.15, attack: 0.2, sustain: 0.5, release: 0.3 });
+      }
+    },
+    backtrack(colorIdx, pathLength) {
+      if (!soundEnabled) return;
+      const p = activeParams.cosmic;
+      const ctx = getAudioCtx();
+      const dest = getMasterOut('cosmic');
+      const now = ctx.currentTime;
+      const base = colorFreq(colorIdx);
+      const semitones = Math.min(pathLength, p.pitchCap ?? 12) * (p.pitchClimb ?? 1.5);
+      const freq = base * Math.pow(2, semitones / 12);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.04, now);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+      g.connect(dest);
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now);
+      osc.frequency.exponentialRampToValueAtTime(freq * Math.pow(2, -100 / 1200), now + 0.3);
+      osc.connect(g);
+      osc.start(now);
+      osc.stop(now + 0.5);
+    },
+    pathComplete(colorIdx) {
+      const p = activeParams.cosmic;
+      this._drone(colorFreq(colorIdx) * 0.5, { gain: p.completeGain ?? 0.12 });
+    },
+    win() {
+      if (!soundEnabled) return;
+      const p = activeParams.cosmic;
+      const freqs = [65, 98, 164, 260];
+      freqs.forEach((f, i) => {
+        setTimeout(() => {
+          this._drone(f, { gain: p.winGain ?? 0.1, attack: 0.4, sustain: 2.5, release: 2.0 });
+        }, i * 400);
+      });
+    },
+    blocked() {
+      const p = activeParams.cosmic;
+      this._noiseBurst({ gain: p.blockedGain ?? 0.03, duration: 0.08, freq: 800 });
+    },
+    preview() {
+      if (!soundEnabled) return;
+      this.startDraw(3);
+      setTimeout(() => this.cellEnter(3, 2), 400);
+      setTimeout(() => this.cellEnter(3, 4), 750);
+      setTimeout(() => this._radarPing(colorFreq(3) * 1.5, { gain: 0.06, decay: 0.5 }), 1050);
+      setTimeout(() => this._drone(colorFreq(3) * 0.25, { gain: 0.1, attack: 0.3, sustain: 0.5, release: 0.4 }), 1350);
+    },
+  };
+
+  // --- Palette registry ---
+  const palettes = { zen: zenPalette, playful: playfulPalette, dreamy: dreamyPalette, cosmic: cosmicPalette };
+  let activePalette = zenPalette;
+
+  // Load saved palette
+  const savedPalette = localStorage.getItem('vibe-sound-palette');
+  if (savedPalette && palettes[savedPalette]) {
+    activePalette = palettes[savedPalette];
+  }
+
+  // --- Settings overlay wiring ---
+  function buildPaletteList() {
+    const listEl = document.getElementById('paletteList');
+    listEl.innerHTML = '';
+    for (const p of Object.values(palettes)) {
+      const row = document.createElement('div');
+      row.className = 'palette-row' + (p === activePalette ? ' selected' : '');
+      row.dataset.key = p.key;
+      row.innerHTML = `<div class="palette-info"><div class="palette-name">${p.name}</div><div class="palette-desc">${p.desc}</div></div><button class="palette-preview-btn" title="Preview">🔈</button>`;
+      // Tap row = select + preview
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('.palette-preview-btn')) return;
+        activePalette = p;
+        localStorage.setItem('vibe-sound-palette', p.key);
+        listEl.querySelectorAll('.palette-row').forEach(r => r.classList.remove('selected'));
+        row.classList.add('selected');
+        p.preview();
+      });
+      // Tap speaker = preview only
+      row.querySelector('.palette-preview-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        p.preview();
+      });
+      listEl.appendChild(row);
+    }
+  }
+
+  // Convenience wrappers called by game code
+  function soundStartDraw(ci) { activePalette.startDraw(ci); }
+  function soundCellEnter(ci, pl) { activePalette.cellEnter(ci, pl); }
+  function soundBacktrack(ci, pl) { activePalette.backtrack(ci, pl); }
+  function soundPathComplete(ci) { activePalette.pathComplete(ci); }
+  function soundWin() { activePalette.win(); }
+  function soundBlocked() { activePalette.blocked(); }
+
+  // === VIBE ENGINE END ===
+
+  // --- Constants ---
+  // Brand palette — ordered for max distinction per difficulty tier
+  const COLORS = [
+    '#F77976', // coral
+    '#52E3E1', // cyan
+    '#A0E426', // lime
+    '#B535E8', // purple-magenta
+    '#FFAB00', // orange
+    '#F050AE', // pink
+    '#7B68EE', // periwinkle
+    '#FDF148', // yellow
+    '#D883FF', // lavender
+  ];
+
+  const DIFFICULTIES = {
+    easy:   { size: 6, maxSize: 8,  minColors: 4, maxColors: 5, minSeg: 3, redraws: 8 },
+    medium: { size: 8, maxSize: 10, minColors: 5, maxColors: 7, minSeg: 3, redraws: 5 },
+    hard:   { size: 11, maxSize: 13, minColors: 7, maxColors: 9, minSeg: 3, redraws: 2 },
+  };
+  // Daily puzzle uses a fixed configuration so everyone gets a comparable board.
+  const DAILY_CONFIG = { size: 8, colors: 6, minSeg: 3, redraws: 5 };
+  const SHARE_URL = 'https://caldwellcourtneyc.github.io/game-lab/glowflow.html';
+
+  // --- Seeded RNG (used for daily puzzle; falls back to Math.random) ---
+  // mulberry32 — small, fast, deterministic from a 32-bit seed.
+  function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function() {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  let rng = Math.random;   // swapped to a seeded fn for daily puzzles
+
+  // --- State ---
+  let difficulty = 'easy';
+  let gridSize = 5;
+  let numColors = 3;
+  let level = 1;            // current level within difficulty
+  const levels = { easy: 1, medium: 1, hard: 1 }; // per-difficulty progress
+  let puzzle = null;
+  let playerPaths = [];    // [{colorIdx, cells:[{r,c},...], complete:bool}]
+  let playerGrid = [];     // 2D: colorIdx or -1
+  let drawing = false;
+  let drawingColorIdx = -1;
+  let drawingPathIdx = -1;
+  let timerInterval = null;
+  let startTime = 0;
+  let elapsed = 0;
+  let pausedTotal = 0;      // ms spent paused (tuner open) — excluded from elapsed
+  let pauseStart = 0;
+  let won = false;
+  let dailyMode = false;    // playing today's seeded daily puzzle
+  let challengeMode = localStorage.getItem('glowflow-challenge') === '1';
+  let clearCount = 0;       // completed-path clears this puzzle (drives flawless + challenge budget)
+  let redrawsLeft = 8;      // challenge-mode redraws remaining this puzzle
+  let maxRedraws = 8;       // total redraws for this difficulty
+  let cellPx = 0;           // pixel size of one cell (for canvas)
+  let winGlow = 0;          // 0-1 animated glow multiplier on win
+  let melodyPlaying = false; // true while the board is replaying its melody
+  let melodyToken = 0;       // invalidates in-flight melody note timers on reset
+  let lastWin = null;        // { flawless, time } of the most recent solve, for the share card
+
+  // --- Persistent stats ---
+  const DEFAULT_STATS = {
+    solved: 0, flawless: 0,
+    best: { easy: null, medium: null, hard: null, daily: null },
+    dailyStreak: 0, dailyLast: null, dailyBestStreak: 0,
+  };
+  function loadStats() {
+    try {
+      const s = JSON.parse(localStorage.getItem('glowflow-stats') || '{}');
+      return { ...DEFAULT_STATS, ...s, best: { ...DEFAULT_STATS.best, ...(s.best || {}) } };
+    } catch { return { ...DEFAULT_STATS, best: { ...DEFAULT_STATS.best } }; }
+  }
+  let stats = loadStats();
+  function saveStats() { localStorage.setItem('glowflow-stats', JSON.stringify(stats)); }
+
+  // Restore saved per-difficulty levels
+  (function restoreLevels() {
+    for (const k of ['easy', 'medium', 'hard']) {
+      const v = parseInt(localStorage.getItem('glowflow-level-' + k), 10);
+      if (v > 0) levels[k] = v;
+    }
+  })();
+
+  // Date helpers for the daily puzzle
+  function dayNumber() {
+    // Days since 2026-01-01, local time — the "#N" in the share card.
+    const now = new Date();
+    const start = new Date(2026, 0, 1);
+    return Math.floor((now - start) / 86400000) + 1;
+  }
+  function todayKey() {
+    const n = new Date();
+    return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`;
+  }
+
+  // --- DOM ---
+  const gridEl = document.getElementById('grid');
+  const gridWrapper = document.getElementById('grid-wrapper');
+  const pathCanvas = document.getElementById('path-canvas');
+  const ctx = pathCanvas.getContext('2d');
+  const timerEl = document.getElementById('timer');
+  const flowCounterEl = document.getElementById('flowCounter');
+  const winOverlay = document.getElementById('winOverlay');
+  const winText = document.getElementById('winText');
+  const helpOverlay = document.getElementById('helpOverlay');
+  const levelDisplay = document.getElementById('levelDisplay');
+  const redrawCounterEl = document.getElementById('redrawCounter');
+
+  // --- Helpers ---
+  function adj4(r, c, sz) {
+    const out = [];
+    if (r > 0)    out.push({r:r-1,c});
+    if (r < sz-1) out.push({r:r+1,c});
+    if (c > 0)    out.push({r,c:c-1});
+    if (c < sz-1) out.push({r,c:c+1});
+    return out;
+  }
+
+  function shuffle(a) {
+    for (let i = a.length-1; i > 0; i--) {
+      const j = Math.floor(rng()*(i+1));
+      [a[i],a[j]] = [a[j],a[i]];
+    }
+    return a;
+  }
+
+  function formatTime(s) {
+    return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`;
+  }
+
+  // --- Robust Puzzle Generation ---
+  // Strategy: build a random Hamiltonian path through the grid,
+  // then cut it into nColors segments. Endpoints of segments become dots.
+  function generatePuzzle(size, nColors, minSeg) {
+    const minSegLen0 = minSeg ?? (DIFFICULTIES[difficulty] ? DIFFICULTIES[difficulty].minSeg : 3);
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const path = buildHamiltonianPath(size);
+      if (!path) continue;
+
+      // We have a path visiting all size*size cells.
+      // Cut it into nColors segments.
+      const totalCells = size * size;
+      const minSegLen = minSegLen0;
+
+      // Generate random cut points
+      const segments = splitPath(path, nColors, minSegLen, totalCells);
+      if (!segments) continue;
+
+      // Build the grid and endpoints
+      const grid = Array.from({length:size}, () => Array(size).fill(-1));
+      const endpoints = new Map();
+
+      for (let ci = 0; ci < segments.length; ci++) {
+        const seg = segments[ci];
+        for (const {r,c} of seg) grid[r][c] = ci;
+        endpoints.set(ci, [seg[0], seg[seg.length-1]]);
+      }
+
+      return { endpoints, solution: grid, size };
+    }
+
+    // Fallback: snake pattern
+    return fallbackPuzzle(size, nColors);
+  }
+
+  function buildHamiltonianPath(size) {
+    // Use Warnsdorf's heuristic adapted for grid traversal
+    const visited = Array.from({length:size}, () => Array(size).fill(false));
+    const total = size * size;
+
+    // Try several starting positions
+    const starts = [];
+    for (let r = 0; r < size; r++)
+      for (let c = 0; c < size; c++)
+        starts.push({r,c});
+    shuffle(starts);
+
+    for (const start of starts.slice(0, 10)) {
+      // Reset
+      for (let r = 0; r < size; r++) visited[r].fill(false);
+
+      const path = [start];
+      visited[start.r][start.c] = true;
+
+      while (path.length < total) {
+        const cur = path[path.length-1];
+        const nbrs = adj4(cur.r, cur.c, size).filter(n => !visited[n.r][n.c]);
+
+        if (nbrs.length === 0) break;
+
+        // Warnsdorf: pick neighbor with fewest onward moves
+        nbrs.sort((a,b) => {
+          const da = adj4(a.r,a.c,size).filter(n => !visited[n.r][n.c]).length;
+          const db = adj4(b.r,b.c,size).filter(n => !visited[n.r][n.c]).length;
+          return da - db;
+        });
+
+        // Among ties, pick randomly
+        let minDeg = adj4(nbrs[0].r,nbrs[0].c,size).filter(n => !visited[n.r][n.c]).length;
+        const ties = nbrs.filter(n => {
+          return adj4(n.r,n.c,size).filter(nn => !visited[nn.r][nn.c]).length === minDeg;
+        });
+
+        const next = ties[Math.floor(rng()*ties.length)];
+        visited[next.r][next.c] = true;
+        path.push(next);
+      }
+
+      if (path.length === total) return path;
+    }
+
+    // If Warnsdorf fails, try simple snake
+    const path = [];
+    for (let r = 0; r < size; r++) {
+      if (r % 2 === 0) {
+        for (let c = 0; c < size; c++) path.push({r,c});
+      } else {
+        for (let c = size-1; c >= 0; c--) path.push({r,c});
+      }
+    }
+    return path;
+  }
+
+  function splitPath(path, nColors, minSegLen, totalCells) {
+    // Ensure we can fit nColors segments of at least minSegLen
+    if (totalCells < nColors * minSegLen) return null;
+
+    // Generate cut points
+    const cuts = [0]; // start of first segment
+    const remaining = totalCells - nColors * minSegLen;
+
+    // Distribute extra cells randomly
+    const extras = Array(nColors).fill(0);
+    for (let i = 0; i < remaining; i++) {
+      extras[Math.floor(rng()*nColors)]++;
+    }
+
+    let pos = 0;
+    for (let i = 0; i < nColors; i++) {
+      const segLen = minSegLen + extras[i];
+      pos += segLen;
+      cuts.push(pos);
+    }
+
+    // Build segments
+    const segments = [];
+    for (let i = 0; i < nColors; i++) {
+      segments.push(path.slice(cuts[i], cuts[i+1]));
+    }
+
+    return segments;
+  }
+
+  function fallbackPuzzle(size, nColors) {
+    const path = [];
+    for (let r = 0; r < size; r++) {
+      if (r%2===0) for (let c = 0; c < size; c++) path.push({r,c});
+      else for (let c = size-1; c >= 0; c--) path.push({r,c});
+    }
+    const totalCells = size*size;
+    const minLen = 2;
+    const segments = splitPath(path, nColors, minLen, totalCells);
+    const grid = Array.from({length:size}, () => Array(size).fill(-1));
+    const endpoints = new Map();
+    for (let ci = 0; ci < segments.length; ci++) {
+      for (const {r,c} of segments[ci]) grid[r][c] = ci;
+      endpoints.set(ci, [segments[ci][0], segments[ci][segments[ci].length-1]]);
+    }
+    return { endpoints, solution: grid, size };
+  }
+
+  // --- Grid Build ---
+  function buildGrid() {
+    // Calculate size
+    const maxPx = Math.min(window.innerWidth * 0.92, window.innerHeight * 0.62, 540);
+    const gap = 2;
+    cellPx = Math.floor((maxPx - 16 - gap * (gridSize - 1)) / gridSize);
+    const totalPx = cellPx * gridSize + gap * (gridSize - 1) + 16;
+
+    gridWrapper.style.width = totalPx + 'px';
+    gridWrapper.style.height = totalPx + 'px';
+
+    gridEl.innerHTML = '';
+    gridEl.style.gridTemplateColumns = `repeat(${gridSize}, ${cellPx}px)`;
+    gridEl.style.gridTemplateRows = `repeat(${gridSize}, ${cellPx}px)`;
+
+    pathCanvas.width = cellPx * gridSize + gap * (gridSize - 1);
+    pathCanvas.height = pathCanvas.width;
+    pathCanvas.style.width = pathCanvas.width + 'px';
+    pathCanvas.style.height = pathCanvas.height + 'px';
+
+    for (let r = 0; r < gridSize; r++) {
+      for (let c = 0; c < gridSize; c++) {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        cell.style.width = cellPx + 'px';
+        cell.style.height = cellPx + 'px';
+        cell.dataset.r = r;
+        cell.dataset.c = c;
+
+        // Check endpoints
+        for (const [ci, [a, b]] of puzzle.endpoints) {
+          if ((a.r===r && a.c===c) || (b.r===r && b.c===c)) {
+            const dot = document.createElement('div');
+            dot.className = 'dot';
+            dot.style.background = COLORS[ci];
+            dot.style.boxShadow = `0 0 12px ${COLORS[ci]}, 0 0 24px ${COLORS[ci]}44`;
+            cell.appendChild(dot);
+            cell.dataset.dotColor = ci;
+            break;
+          }
+        }
+        gridEl.appendChild(cell);
+      }
+    }
+  }
+
+  // --- Canvas Path Rendering ---
+  function cellCenter(r, c) {
+    const gap = 2;
+    return {
+      x: c * (cellPx + gap) + cellPx / 2,
+      y: r * (cellPx + gap) + cellPx / 2,
+    };
+  }
+
+  // --- Visual feedback effects (rings, ticks) rendered on the path canvas ---
+  // A single animation loop owns the canvas while anything is animating:
+  // transient fx, the win-glow breathe, or melody playback. This prevents
+  // competing rAF loops from clearing each other's frames.
+  let fxList = [];       // { r, c, color, born, dur, type }
+  let animActive = false;
+  let winGlowAnim = null;  // { start, dur } while the win breathe is running
+
+  function nowMs() { return performance.now(); }
+
+  function spawnRing(r, c, color, dur) {
+    fxList.push({ r, c, color, born: nowMs(), dur: dur || 480, type: 'ring' });
+    ensureAnim();
+  }
+  function spawnTick(r, c, color) {
+    fxList.push({ r, c, color, born: nowMs(), dur: 200, type: 'tick' });
+    ensureAnim();
+  }
+
+  function drawFx() {
+    const t = nowMs();
+    for (let i = fxList.length - 1; i >= 0; i--) {
+      const fx = fxList[i];
+      const p = (t - fx.born) / fx.dur;
+      if (p >= 1) { fxList.splice(i, 1); continue; }
+      const ctr = cellCenter(fx.r, fx.c);
+      ctx.save();
+      if (fx.type === 'ring') {
+        const rad = cellPx * (0.3 + p * 0.7);
+        ctx.globalAlpha = (1 - p) * 0.7;
+        ctx.strokeStyle = fx.color;
+        ctx.lineWidth = cellPx * 0.12 * (1 - p) + 1;
+        ctx.shadowColor = fx.color;
+        ctx.shadowBlur = 16 * (1 - p);
+        ctx.beginPath();
+        ctx.arc(ctr.x, ctr.y, rad, 0, Math.PI * 2);
+        ctx.stroke();
+      } else { // tick — brief bright pop at the newly entered cell
+        const rad = cellPx * (0.18 + p * 0.14);
+        ctx.globalAlpha = (1 - p) * 0.5;
+        ctx.fillStyle = fx.color;
+        ctx.beginPath();
+        ctx.arc(ctr.x, ctr.y, rad, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
+  function updateWinGlow() {
+    if (!winGlowAnim) return;
+    const t = Math.min((nowMs() - winGlowAnim.start) / winGlowAnim.dur, 1);
+    if (t < 0.35) {
+      const r = t / 0.35;
+      winGlow = r * (2 - r);       // quick ease-out rise
+    } else {
+      const f = (t - 0.35) / 0.65;
+      winGlow = 1 - f * f;         // gentle ease-in fall
+    }
+    if (t >= 1) {
+      winGlow = 0;
+      winGlowAnim = null;
+      onWinBreatheDone();
+    }
+  }
+
+  function animActiveNeeded() {
+    return fxList.length > 0 || winGlowAnim || melodyPlaying;
+  }
+
+  function ensureAnim() {
+    if (animActive) return;
+    animActive = true;
+    (function loop() {
+      updateWinGlow();
+      renderPaths();      // repaint paths, then overlay effects
+      drawFx();
+      if (animActiveNeeded()) {
+        requestAnimationFrame(loop);
+      } else {
+        animActive = false;
+        winGlow = 0;
+        renderPaths();    // clean final frame
+      }
+    })();
+  }
+
+  // Haptic feedback (mobile) — feature-detected, silent on desktop
+  function buzz(pattern) {
+    if (navigator.vibrate) { try { navigator.vibrate(pattern); } catch {} }
+  }
+
+  // Blocked-move visual: shake the board + red pulse
+  let _shakeTimer = null;
+  function flashBlocked() {
+    gridWrapper.classList.add('shake', 'blocked-pulse');
+    clearTimeout(_shakeTimer);
+    _shakeTimer = setTimeout(() => {
+      gridWrapper.classList.remove('shake', 'blocked-pulse');
+    }, 300);
+  }
+
+  function renderPaths() {
+    const gap = 2;
+    const w = pathCanvas.width;
+    const h = pathCanvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // Rebuild playerGrid
+    playerGrid = Array.from({length:gridSize}, () => Array(gridSize).fill(-1));
+
+    const radius = cellPx * 0.38;
+
+    for (const path of playerPaths) {
+      if (path.cells.length === 0) continue;
+      const color = COLORS[path.colorIdx];
+      const alpha = path.active ? 0.85 : 0.7;
+
+      // Mark cells
+      for (const {r,c} of path.cells) playerGrid[r][c] = path.colorIdx;
+
+      // Draw path as thick rounded line with neon glow
+      if (path.cells.length >= 2) {
+        // Glow layer (boosted during win animation)
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = cellPx * (0.85 + winGlow * 0.15);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.globalAlpha = 0.15 + winGlow * 0.25;
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 20 + winGlow * 30;
+        ctx.beginPath();
+        const gf = cellCenter(path.cells[0].r, path.cells[0].c);
+        ctx.moveTo(gf.x, gf.y);
+        for (let i = 1; i < path.cells.length; i++) {
+          const p = cellCenter(path.cells[i].r, path.cells[i].c);
+          ctx.lineTo(p.x, p.y);
+        }
+        ctx.stroke();
+        ctx.restore();
+
+        // Main path
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = cellPx * 0.6;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.globalAlpha = (path.active ? 0.9 : 0.75) + winGlow * 0.25;
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 8 + winGlow * 16;
+        ctx.beginPath();
+        const first = cellCenter(path.cells[0].r, path.cells[0].c);
+        ctx.moveTo(first.x, first.y);
+        for (let i = 1; i < path.cells.length; i++) {
+          const p = cellCenter(path.cells[i].r, path.cells[i].c);
+          ctx.lineTo(p.x, p.y);
+        }
+        ctx.stroke();
+        ctx.restore();
+      } else if (path.cells.length === 1) {
+        // Single dot highlight with glow
+        const p = cellCenter(path.cells[0].r, path.cells[0].c);
+        ctx.save();
+        ctx.globalAlpha = 0.4;
+        ctx.fillStyle = color;
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 15;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, cellPx * 0.3, 0, Math.PI*2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    // Update cell backgrounds
+    const cells = gridEl.querySelectorAll('.cell');
+    cells.forEach(cell => {
+      const r = +cell.dataset.r, c = +cell.dataset.c;
+      if (playerGrid[r][c] !== -1) {
+        cell.style.background = 'rgba(31,43,71,0.3)';
+      } else {
+        cell.style.background = '';
+      }
+    });
+
+    updateCounters();
+  }
+
+  function updateCounters() {
+    if (!puzzle) return;
+    const completed = playerPaths.filter(p => p.complete).length;
+    flowCounterEl.textContent = `${completed} / ${puzzle.endpoints.size} flows`;
+  }
+
+  // --- Interaction ---
+  function getCellFromPoint(x, y) {
+    const el = document.elementFromPoint(x, y);
+    if (!el) return null;
+    const cell = el.closest('.cell');
+    if (!cell) return null;
+    return { r: +cell.dataset.r, c: +cell.dataset.c };
+  }
+
+  function endpointColor(r, c) {
+    for (const [ci, [a,b]] of puzzle.endpoints) {
+      if ((a.r===r && a.c===c) || (b.r===r && b.c===c)) return ci;
+    }
+    return -1;
+  }
+
+  function clearColor(ci) {
+    playerPaths = playerPaths.filter(p => p.colorIdx !== ci);
+    renderPaths();
+  }
+
+  function updateRedrawCounter() {
+    if (!challengeMode) { redrawCounterEl.style.display = 'none'; return; }
+    redrawCounterEl.style.display = '';
+    redrawCounterEl.textContent = `${redrawsLeft} redraw${redrawsLeft !== 1 ? 's' : ''}`;
+    redrawCounterEl.style.color = redrawsLeft <= 2 ? '#e94560' : '';
+  }
+
+  // Unified clear. Handles both modes and both desktop/touch entry points.
+  // Clearing an in-progress path is always free. Clearing a *completed* path
+  // counts toward flawless, and in Challenge mode spends a redraw / can end the run.
+  // Returns true if the clear happened, false if it was blocked (out of redraws).
+  function doClear(ci) {
+    const existing = playerPaths.find(p => p.colorIdx === ci);
+    const isCompleted = existing && existing.complete;
+    if (isCompleted) {
+      if (challengeMode && redrawsLeft <= 0) {
+        triggerGameOver();
+        return false;
+      }
+      clearCount++;
+      if (challengeMode) {
+        redrawsLeft--;
+        updateRedrawCounter();
+      }
+    }
+    clearColor(ci);
+    return true;
+  }
+
+  function triggerGameOver() {
+    won = true; // prevent further interaction
+    clearInterval(timerInterval);
+    const completed = playerPaths.filter(p => p.complete).length;
+    const total = puzzle.endpoints.size;
+    document.getElementById('gameOverText').textContent =
+      `${completed} / ${total} flows completed — ${formatTime(elapsed)}`;
+    soundBlocked();
+    document.getElementById('gameOverOverlay').classList.add('show');
+  }
+
+  function startDraw(r, c) {
+    if (won) return;
+    const ci = endpointColor(r, c);
+    if (ci !== -1) {
+      if (!doClear(ci)) { soundBlocked(); return; }
+      playerPaths.push({ colorIdx: ci, cells: [{r,c}], complete: false, active: true });
+      drawingColorIdx = ci;
+      drawingPathIdx = playerPaths.length - 1;
+      drawing = true;
+      soundStartDraw(ci);
+      renderPaths();
+      return;
+    }
+    // Click on existing path => clear it
+    if (playerGrid[r] && playerGrid[r][c] !== undefined && playerGrid[r][c] !== -1) {
+      doClear(playerGrid[r][c]);
+    }
+  }
+
+  function continueDraw(r, c) {
+    if (!drawing || won) return;
+    const path = playerPaths[drawingPathIdx];
+    if (!path) return;
+    const last = path.cells[path.cells.length-1];
+    if (last.r === r && last.c === c) return;
+    if (Math.abs(last.r-r)+Math.abs(last.c-c) !== 1) return;
+
+    // Backtrack check
+    if (path.cells.length >= 2) {
+      const prev = path.cells[path.cells.length-2];
+      if (prev.r === r && prev.c === c) {
+        path.cells.pop();
+        soundBacktrack(drawingColorIdx, path.cells.length);
+        renderPaths();
+        return;
+      }
+    }
+
+    // If the trail head already sits on this color's closing endpoint, only
+    // backtracking is allowed — can't extend past the endpoint. Nothing is
+    // "completed" until the pointer is released (see endDraw).
+    const head = path.cells[path.cells.length-1];
+    const startCell = path.cells[0];
+    if (path.cells.length >= 2 && endpointColor(head.r, head.c) === drawingColorIdx
+        && !(head.r === startCell.r && head.c === startCell.c)) {
+      return;
+    }
+
+    // No revisiting own path
+    if (path.cells.some(p => p.r===r && p.c===c)) return;
+
+    // Matching endpoint? Reach it like any cell — completion is decided on release,
+    // so you can keep adjusting or reroute while still holding the pointer.
+    const ci = endpointColor(r, c);
+    if (ci === drawingColorIdx) {
+      path.cells.push({r,c});
+      soundCellEnter(drawingColorIdx, path.cells.length);
+      spawnTick(r, c, COLORS[drawingColorIdx]);
+      renderPaths();
+      return;
+    }
+
+    // Don't land on a different color's endpoint
+    if (ci !== -1) { blockedFeedback(); return; }
+
+    // If cell occupied by other color, block the move instead of deleting
+    if (playerGrid[r][c] !== -1 && playerGrid[r][c] !== drawingColorIdx) {
+      blockedFeedback();
+      return;
+    }
+
+    path.cells.push({r,c});
+    soundCellEnter(drawingColorIdx, path.cells.length);
+    spawnTick(r, c, COLORS[drawingColorIdx]);
+    renderPaths();
+  }
+
+  // Blocked feedback, throttled so a drag held against a wall doesn't buzz continuously.
+  let _lastBlocked = 0;
+  function blockedFeedback() {
+    soundBlocked();
+    const t = nowMs();
+    if (t - _lastBlocked > 220) {
+      _lastBlocked = t;
+      flashBlocked();
+      buzz([8, 24, 8]);
+    }
+  }
+
+  // Fast drags skip cells because pointer sampling isn't continuous. Walk the
+  // grid from the current path head toward the sampled cell one step at a time,
+  // feeding each step to continueDraw (which handles extend / backtrack / block).
+  function drawToCell(tr, tc) {
+    if (!drawing || won) return;
+    let guard = 0;
+    while (guard++ < 128) {
+      const path = playerPaths[drawingPathIdx];
+      if (!path) return;
+      const head = path.cells[path.cells.length - 1];
+      if (head.r === tr && head.c === tc) break;
+      // Step one cell toward the target (row first, then column).
+      let nr = head.r, nc = head.c;
+      if (head.r !== tr) nr += Math.sign(tr - head.r);
+      else if (head.c !== tc) nc += Math.sign(tc - head.c);
+      const before = path.cells.length;
+      continueDraw(nr, nc);
+      const after = (playerPaths[drawingPathIdx] || {}).cells
+        ? playerPaths[drawingPathIdx].cells.length : before;
+      if (!drawing) break;            // path completed mid-walk
+      if (after === before) break;    // move was blocked/invalid — stop the walk
+    }
+  }
+
+  function endDraw() {
+    if (!drawing) return;
+    const path = playerPaths[drawingPathIdx];
+    const ci = drawingColorIdx;
+    let justCompleted = false;
+    if (path) {
+      path.active = false;
+      // Completion is decided here, on release: the trail is complete only if its
+      // head rests on the matching endpoint (and it's more than a lone dot).
+      const head = path.cells[path.cells.length - 1];
+      const start = path.cells[0];
+      const connected = path.cells.length >= 2
+        && endpointColor(head.r, head.c) === ci
+        && !(head.r === start.r && head.c === start.c);
+      if (connected) {
+        path.complete = true;
+        justCompleted = true;
+      } else if (!path.complete && path.cells.length <= 1) {
+        playerPaths.splice(drawingPathIdx, 1);
+      }
+    }
+    drawing = false;
+    drawingColorIdx = -1;
+    drawingPathIdx = -1;
+    renderPaths();
+    // Completion commits on release: play the flourish and check for a win now.
+    if (justCompleted && path) {
+      const end = path.cells[path.cells.length - 1];
+      soundPathComplete(ci);
+      spawnRing(end.r, end.c, COLORS[ci], 520);
+      buzz(22);
+      checkWin();
+    }
+  }
+
+  // --- Win ---
+  function checkWin() {
+    if (playerPaths.filter(p => p.complete).length !== puzzle.endpoints.size) return;
+    for (let r = 0; r < gridSize; r++)
+      for (let c = 0; c < gridSize; c++)
+        if (playerGrid[r][c] === -1) return;
+    won = true;
+    drawing = false;
+    clearInterval(timerInterval);
+
+    // Flawless = solved without clearing any completed path (both modes).
+    const flawless = clearCount === 0;
+    document.getElementById('winPerfect').style.display = flawless ? '' : 'none';
+    document.getElementById('winTitle').textContent = flawless ? 'FLAWLESS' : 'SOLVED';
+    let sub;
+    if (flawless) sub = `Solved in ${formatTime(elapsed)} — flawless`;
+    else if (challengeMode) sub = `Completed in ${formatTime(elapsed)} — ${maxRedraws - redrawsLeft} redraw${maxRedraws - redrawsLeft !== 1 ? 's' : ''} used`;
+    else sub = `Completed in ${formatTime(elapsed)} — ${clearCount} redo${clearCount !== 1 ? 's' : ''}`;
+    winText.textContent = sub;
+
+    lastWin = { flawless, time: elapsed };
+    recordWin(flawless);
+    renderWinStats();
+    soundWin();
+    buzz([12, 40, 12, 40, 24]);
+    playWinAnimation();
+    // rAF-independent guarantee: the win card appears even if the animation loop
+    // is throttled (e.g. a backgrounded tab). Longer than the normal breathe+melody
+    // flow (~4s) so it never preempts the intended sequence.
+    setTimeout(() => { if (won) winOverlay.classList.add('show'); }, 6000);
+  }
+
+  // --- Stats recording + win-screen readout ---
+  function recordWin(flawless) {
+    stats.solved++;
+    if (flawless) stats.flawless++;
+    const bestKey = dailyMode ? 'daily' : difficulty;
+    if (stats.best[bestKey] == null || elapsed < stats.best[bestKey]) {
+      stats.best[bestKey] = elapsed;
+    }
+    if (dailyMode) {
+      const today = todayKey();
+      if (stats.dailyLast !== today) {
+        // Continue the streak if the last solve was yesterday, else reset to 1.
+        const y = new Date(); y.setDate(y.getDate() - 1);
+        const yKey = `${y.getFullYear()}-${String(y.getMonth()+1).padStart(2,'0')}-${String(y.getDate()).padStart(2,'0')}`;
+        stats.dailyStreak = (stats.dailyLast === yKey) ? stats.dailyStreak + 1 : 1;
+        stats.dailyLast = today;
+        if (stats.dailyStreak > stats.dailyBestStreak) stats.dailyBestStreak = stats.dailyStreak;
+      }
+    }
+    saveStats();
+  }
+
+  function renderWinStats() {
+    const el = document.getElementById('winStats');
+    const bestKey = dailyMode ? 'daily' : difficulty;
+    const best = stats.best[bestKey];
+    const parts = [];
+    if (dailyMode) {
+      parts.push(`Daily streak <strong>${stats.dailyStreak}</strong>`);
+      if (best != null) parts.push(`Best today <strong>${formatTime(best)}</strong>`);
+    } else {
+      if (best != null) parts.push(`Best <strong>${formatTime(best)}</strong>`);
+    }
+    parts.push(`<strong>${stats.solved}</strong> solved`);
+    parts.push(`<strong>${stats.flawless}</strong> flawless`);
+    el.innerHTML = parts.join(' &nbsp;·&nbsp; ');
+  }
+
+  // --- Share card ---
+  function buildShareText() {
+    const w = lastWin || { flawless: clearCount === 0, time: elapsed };
+    const label = dailyMode
+      ? `Daily #${dayNumber()}`
+      : `${difficulty.charAt(0).toUpperCase() + difficulty.slice(1)} Lv${level}`;
+    const badge = w.flawless ? 'Flawless' : `${clearCount} redo${clearCount !== 1 ? 's' : ''}`;
+    const line = `GLOWFLOW ${label} · ${activePalette.name} · ${badge} · ${formatTime(w.time)}`;
+    return SHARE_URL ? `${line}\n${SHARE_URL}` : line;
+  }
+  function shareWin() {
+    const text = buildShareText();
+    const btn = document.getElementById('winShare');
+    const done = () => { const o = btn.textContent; btn.textContent = '✓ Copied!'; setTimeout(() => btn.textContent = o, 1600); };
+    if (navigator.share) {
+      navigator.share({ text }).catch(() => {
+        navigator.clipboard && navigator.clipboard.writeText(text).then(done).catch(() => {});
+      });
+    } else if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(done).catch(() => {});
+    }
+  }
+
+  function playWinAnimation() {
+    winGlowAnim = { start: nowMs(), dur: 1800 };
+    ensureAnim();
+  }
+
+  // After the breathe, just show the card. The melody playback is opt-in via the
+  // "Replay melody" button — no unprompted sound/flashing after every solve.
+  function onWinBreatheDone() {
+    showWinCard();
+  }
+  function showWinCard() {
+    if (won) winOverlay.classList.add('show');
+  }
+
+  // Replay the completed board as music, lighting each cell as its note plays.
+  function playMelody(opts = {}) {
+    if (!puzzle) return;
+    const token = ++melodyToken;
+    melodyPlaying = true;
+    ensureAnim();
+    const completed = playerPaths.filter(p => p.complete).slice();
+    // Reading order (top-left first) for a stable, repeatable tune.
+    completed.sort((a, b) => (a.cells[0].r - b.cells[0].r) || (a.cells[0].c - b.cells[0].c));
+    const totalCells = completed.reduce((s, p) => s + p.cells.length, 0) || 1;
+    // Auto-play (before the win card) targets a snappy ~1.5s shimmer so repeat
+    // wins don't stall; the Replay button passes a slower, more musical perCell.
+    const perCell = opts.perCell ?? Math.max(24, Math.min(70, Math.round(1500 / totalCells)));
+    const flowGap = opts.flowGap ?? 120;
+    let t = 0;
+    for (const path of completed) {
+      const ci = path.colorIdx;
+      const cells = path.cells;
+      for (let i = 0; i < cells.length; i++) {
+        const cell = cells[i], at = t, len = i + 1;
+        setTimeout(() => {
+          if (token !== melodyToken) return;
+          soundCellEnter(ci, len);
+          spawnRing(cell.r, cell.c, COLORS[ci], 360);
+        }, at);
+        t += perCell;
+      }
+      setTimeout(() => { if (token === melodyToken) soundPathComplete(ci); }, t);
+      t += flowGap;
+    }
+    setTimeout(() => {
+      if (token !== melodyToken) return;
+      melodyPlaying = false;
+      if (opts.onDone) opts.onDone();
+    }, t + 250);
+  }
+
+  // --- Timer ---
+  function startTimer() {
+    clearInterval(timerInterval);
+    startTime = Date.now();
+    pausedTotal = 0;
+    pauseStart = 0;
+    elapsed = 0;
+    timerEl.textContent = '0:00';
+    timerInterval = setInterval(() => {
+      if (isPaused) return; // frozen while tuner is open
+      elapsed = Math.floor((Date.now()-startTime-pausedTotal)/1000);
+      timerEl.textContent = formatTime(elapsed);
+    }, 1000);
+  }
+
+  // --- New Game ---
+  // Reset per-puzzle state and (re)build the board for the current `puzzle`.
+  function resetBoardState() {
+    won = false;
+    drawing = false;
+    drawingColorIdx = -1;
+    drawingPathIdx = -1;
+    melodyPlaying = false;
+    melodyToken++;   // cancel any in-flight melody note timers
+    clearCount = 0;
+    fxList = [];
+    winGlow = 0;
+    winGlowAnim = null;
+    winOverlay.classList.remove('show');
+    document.getElementById('gameOverOverlay').classList.remove('show');
+    playerPaths = [];
+    playerGrid = Array.from({length:gridSize}, () => Array(gridSize).fill(-1));
+    redrawsLeft = maxRedraws;
+    updateRedrawCounter();
+    buildGrid();
+    renderPaths();
+    startTimer();
+  }
+
+  function setActiveButton(id) {
+    document.querySelectorAll('.difficulty-btn').forEach(b => b.classList.remove('active'));
+    if (id) document.getElementById(id) && document.getElementById(id).classList.add('active');
+  }
+
+  // Regular puzzle at the current difficulty + level (random board).
+  function newGame(advance) {
+    dailyMode = false;
+    rng = Math.random;
+    // Keep the difficulty button highlight in sync (e.g. after leaving daily).
+    setActiveButton(null);
+    const db = document.querySelector(`.difficulty-btn[data-diff="${difficulty}"]`);
+    if (db) db.classList.add('active');
+    const d = DIFFICULTIES[difficulty];
+    if (advance) levels[difficulty]++;
+    level = levels[difficulty];
+    localStorage.setItem('glowflow-level-' + difficulty, String(level));
+    // Difficulty curve: grid grows +1 every 2 levels, capped; colors grow per level, capped.
+    gridSize = Math.min(d.size + Math.floor((level - 1) / 2), d.maxSize);
+    numColors = Math.min(d.minColors + level - 1, d.maxColors);
+    levelDisplay.textContent = `Lv ${level}`;
+    maxRedraws = d.redraws;
+    puzzle = generatePuzzle(gridSize, numColors, d.minSeg);
+    resetBoardState();
+  }
+
+  // Today's daily puzzle — deterministic from the date, same board for everyone.
+  function newDaily() {
+    dailyMode = true;
+    setActiveButton('dailyBtn');
+    rng = mulberry32((dayNumber() * 2654435761) >>> 0);
+    gridSize = DAILY_CONFIG.size;
+    numColors = DAILY_CONFIG.colors;
+    level = 1;
+    levelDisplay.textContent = `Daily #${dayNumber()}`;
+    maxRedraws = DAILY_CONFIG.redraws;
+    puzzle = generatePuzzle(gridSize, numColors, DAILY_CONFIG.minSeg);
+    resetBoardState();
+  }
+
+  // Try Again — replay the exact current board (does not regenerate).
+  function replayPuzzle() {
+    resetBoardState();
+  }
+
+  // --- Events ---
+  // Mouse
+  gridEl.addEventListener('mousedown', e => {
+    e.preventDefault();
+    const c = getCellFromPoint(e.clientX, e.clientY);
+    if (c) startDraw(c.r, c.c);
+  });
+  gridEl.addEventListener('mousemove', e => {
+    if (!drawing) return;
+    const c = getCellFromPoint(e.clientX, e.clientY);
+    if (c) drawToCell(c.r, c.c);
+  });
+  document.addEventListener('mouseup', () => endDraw());
+
+  gridEl.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    if (isPaused || won) return;
+    const c = getCellFromPoint(e.clientX, e.clientY);
+    if (c && playerGrid[c.r] && playerGrid[c.r][c.c] !== -1) doClear(playerGrid[c.r][c.c]);
+  });
+  gridEl.addEventListener('dblclick', e => {
+    e.preventDefault();
+    if (isPaused || won) return;
+    const c = getCellFromPoint(e.clientX, e.clientY);
+    if (c && playerGrid[c.r] && playerGrid[c.r][c.c] !== -1) doClear(playerGrid[c.r][c.c]);
+  });
+
+  // Touch
+  gridEl.addEventListener('touchstart', e => {
+    e.preventDefault();
+    const t = e.touches[0];
+    const c = getCellFromPoint(t.clientX, t.clientY);
+    if (c) startDraw(c.r, c.c);
+  }, {passive:false});
+  gridEl.addEventListener('touchmove', e => {
+    e.preventDefault();
+    if (!drawing) return;
+    const t = e.touches[0];
+    const c = getCellFromPoint(t.clientX, t.clientY);
+    if (c) drawToCell(c.r, c.c);
+  }, {passive:false});
+  document.addEventListener('touchend', () => endDraw());
+
+  // Buttons
+  document.getElementById('newGameBtn').addEventListener('click', () => {
+    if (dailyMode) newDaily(); else newGame();
+  });
+  document.getElementById('winNewGame').addEventListener('click', () => {
+    if (dailyMode) newGame(false); else newGame(true);
+  });
+  document.getElementById('retryBtn').addEventListener('click', () => replayPuzzle());
+  document.getElementById('dailyBtn').addEventListener('click', () => newDaily());
+  document.getElementById('winReplay').addEventListener('click', () => playMelody({ perCell: 95, flowGap: 220 }));
+  document.getElementById('winShare').addEventListener('click', () => shareWin());
+  document.getElementById('helpBtn').addEventListener('click', () => { updateHelpText(); helpOverlay.classList.add('show'); });
+  document.getElementById('helpCloseBtn').addEventListener('click', () => {
+    helpOverlay.classList.remove('show');
+    localStorage.setItem('flow-seen-help','1');
+  });
+  helpOverlay.addEventListener('click', e => {
+    if (e.target===helpOverlay) {
+      helpOverlay.classList.remove('show');
+      localStorage.setItem('flow-seen-help','1');
+    }
+  });
+
+  document.getElementById('soundBtn').addEventListener('click', () => {
+    soundEnabled = !soundEnabled;
+    const b = document.getElementById('soundBtn');
+    b.textContent = soundEnabled ? '🔊' : '🔇';
+    b.setAttribute('aria-label', soundEnabled ? 'Mute sound' : 'Unmute sound');
+  });
+
+  // Settings overlay
+  const settingsOverlay = document.getElementById('settingsOverlay');
+  const settingsHeading = settingsOverlay.querySelector('h2');
+  let pendingHelp = false;   // on first visit, help follows the vibe picker
+
+  function updateHelpText() {
+    const tip = document.getElementById('helpRedoTip');
+    if (challengeMode) {
+      tip.innerHTML = "<strong>Challenge mode:</strong> clearing a completed path costs a redraw — run out and it's game over";
+    } else {
+      tip.innerHTML = '<strong>Redo a path:</strong> click it to clear and start over — always free';
+    }
+  }
+
+  function syncChallengeToggle() {
+    document.getElementById('challengeToggle').classList.toggle('on', challengeMode);
+  }
+
+  function openSettings(firstTime) {
+    settingsHeading.textContent = firstTime ? 'CHOOSE YOUR VIBE' : 'VIBE SETTINGS';
+    buildPaletteList();
+    syncChallengeToggle();
+    settingsOverlay.classList.add('show');
+  }
+  function closeSettings() {
+    settingsOverlay.classList.remove('show');
+    if (pendingHelp) { pendingHelp = false; updateHelpText(); helpOverlay.classList.add('show'); }
+  }
+
+  document.getElementById('vibeBtn').addEventListener('click', () => openSettings(false));
+  document.getElementById('settingsCloseBtn').addEventListener('click', closeSettings);
+  settingsOverlay.addEventListener('click', e => {
+    if (e.target === settingsOverlay) closeSettings();
+  });
+
+  document.getElementById('challengeToggle').addEventListener('click', () => {
+    challengeMode = !challengeMode;
+    localStorage.setItem('glowflow-challenge', challengeMode ? '1' : '0');
+    syncChallengeToggle();
+    updateHelpText();
+    // Reflect the mode on the current puzzle immediately.
+    redrawsLeft = Math.max(0, maxRedraws - clearCount);
+    updateRedrawCounter();
+  });
+
+  document.querySelectorAll('.difficulty-btn[data-diff]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      setActiveButton(null);
+      btn.classList.add('active');
+      difficulty = btn.dataset.diff;
+      newGame();
+    });
+  });
+
+  // Resize handler
+  window.addEventListener('resize', () => {
+    if (puzzle) { buildGrid(); renderPaths(); }
+  });
+
+  // --- Help Example ---
+  function buildHelpExample() {
+    const canvas = document.getElementById('helpCanvas');
+    const dpr = window.devicePixelRatio || 1;
+    const gridN = 5;
+    const cellSz = 46;
+    const gap = 2;
+    const pad = 8;
+    const totalSz = pad * 2 + gridN * cellSz + (gridN - 1) * gap;
+
+    canvas.width = totalSz * dpr;
+    canvas.height = totalSz * dpr;
+    canvas.style.width = totalSz + 'px';
+    canvas.style.height = totalSz + 'px';
+
+    const hc = canvas.getContext('2d');
+    hc.scale(dpr, dpr);
+
+    // Background
+    hc.fillStyle = '#0d1525';
+    hc.beginPath();
+    hc.roundRect(0, 0, totalSz, totalSz, 8);
+    hc.fill();
+
+    // Cell centers helper
+    function cc(r, c) {
+      return {
+        x: pad + c * (cellSz + gap) + cellSz / 2,
+        y: pad + r * (cellSz + gap) + cellSz / 2
+      };
+    }
+
+    // Draw cell backgrounds
+    hc.fillStyle = '#141e33';
+    for (let r = 0; r < gridN; r++) {
+      for (let c = 0; c < gridN; c++) {
+        const x = pad + c * (cellSz + gap);
+        const y = pad + r * (cellSz + gap);
+        hc.beginPath();
+        hc.roundRect(x, y, cellSz, cellSz, 3);
+        hc.fill();
+      }
+    }
+
+    // Solved 5x5 puzzle — 4 paths covering all 25 cells
+    const colors = [COLORS[0], COLORS[1], COLORS[2], COLORS[3]]; // red, cyan, green, yellow
+    const paths = [
+      // Red: L-shape down left side
+      [{r:0,c:0},{r:0,c:1},{r:1,c:1},{r:1,c:0},{r:2,c:0},{r:3,c:0}],
+      // Cyan: wraps across top-right
+      [{r:0,c:4},{r:0,c:3},{r:0,c:2},{r:1,c:2},{r:1,c:3},{r:1,c:4}],
+      // Green: snakes through bottom-right
+      [{r:4,c:0},{r:4,c:1},{r:3,c:1},{r:3,c:2},{r:3,c:3},{r:3,c:4},{r:4,c:4},{r:4,c:3},{r:4,c:2}],
+      // Yellow: runs down middle
+      [{r:2,c:1},{r:2,c:2},{r:2,c:3},{r:2,c:4}],
+    ];
+
+    // Draw paths (glow + main line, same style as game)
+    for (let pi = 0; pi < paths.length; pi++) {
+      const path = paths[pi];
+      const color = colors[pi];
+
+      if (path.length >= 2) {
+        // Glow layer
+        hc.save();
+        hc.strokeStyle = color;
+        hc.lineWidth = cellSz * 0.85;
+        hc.lineCap = 'round';
+        hc.lineJoin = 'round';
+        hc.globalAlpha = 0.15;
+        hc.shadowColor = color;
+        hc.shadowBlur = 18;
+        hc.beginPath();
+        const gf = cc(path[0].r, path[0].c);
+        hc.moveTo(gf.x, gf.y);
+        for (let i = 1; i < path.length; i++) {
+          const p = cc(path[i].r, path[i].c);
+          hc.lineTo(p.x, p.y);
+        }
+        hc.stroke();
+        hc.restore();
+
+        // Main path
+        hc.save();
+        hc.strokeStyle = color;
+        hc.lineWidth = cellSz * 0.6;
+        hc.lineCap = 'round';
+        hc.lineJoin = 'round';
+        hc.globalAlpha = 0.75;
+        hc.shadowColor = color;
+        hc.shadowBlur = 8;
+        hc.beginPath();
+        const f = cc(path[0].r, path[0].c);
+        hc.moveTo(f.x, f.y);
+        for (let i = 1; i < path.length; i++) {
+          const p = cc(path[i].r, path[i].c);
+          hc.lineTo(p.x, p.y);
+        }
+        hc.stroke();
+        hc.restore();
+      }
+    }
+
+    // Draw dots at endpoints
+    for (let pi = 0; pi < paths.length; pi++) {
+      const path = paths[pi];
+      const color = colors[pi];
+      const endpoints = [path[0], path[path.length - 1]];
+      const dotR = cellSz * 0.28;
+
+      for (const ep of endpoints) {
+        const p = cc(ep.r, ep.c);
+        // Glow
+        hc.save();
+        hc.globalAlpha = 0.4;
+        hc.shadowColor = color;
+        hc.shadowBlur = 12;
+        hc.fillStyle = color;
+        hc.beginPath();
+        hc.arc(p.x, p.y, dotR + 4, 0, Math.PI * 2);
+        hc.fill();
+        hc.restore();
+        // Solid dot
+        hc.save();
+        hc.globalAlpha = 1;
+        hc.fillStyle = color;
+        hc.shadowColor = color;
+        hc.shadowBlur = 6;
+        hc.beginPath();
+        hc.arc(p.x, p.y, dotR, 0, Math.PI * 2);
+        hc.fill();
+        // Border
+        hc.strokeStyle = 'rgba(255,255,255,0.25)';
+        hc.lineWidth = 1.5;
+        hc.stroke();
+        hc.restore();
+      }
+    }
+  }
+
+  // --- Confetti ---
+
+  // === SOUND TUNER ===
+  let tunerOpen = false;
+  let isPaused = false;
+
+  // Tuner activation is param-gated per visit — never persisted, so a shared
+  // ?tuner=1 link doesn't leave the dev button on for that browser forever.
+  const urlParams = new URLSearchParams(window.location.search);
+  const tunerEnabled = urlParams.get('tuner') === '1';
+  localStorage.removeItem('glowflow-tuner-enabled'); // clear legacy persisted flag
+
+  const tunerToggleBtn = document.getElementById('tunerToggle');
+  const tunerPanel = document.getElementById('tunerPanel');
+  const tunerBackdrop = document.getElementById('tunerBackdrop');
+  const tunerBody = document.getElementById('tunerBody');
+  const tunerActions = document.getElementById('tunerActions');
+
+  if (tunerEnabled) tunerToggleBtn.classList.add('visible');
+
+  // Custom presets from localStorage
+  function loadCustomPresets() {
+    try { return JSON.parse(localStorage.getItem('glowflow-custom-presets') || '{}'); }
+    catch { return {}; }
+  }
+  function saveCustomPresets(presets) {
+    localStorage.setItem('glowflow-custom-presets', JSON.stringify(presets));
+  }
+
+  function openTuner() {
+    tunerOpen = true;
+    isPaused = true;
+    pauseStart = Date.now();   // freeze the timer while the tuner is open
+    tunerPanel.classList.add('show');
+    tunerBackdrop.classList.add('show');
+    buildTunerUI();
+  }
+
+  function closeTuner() {
+    tunerOpen = false;
+    isPaused = false;
+    if (pauseStart) { pausedTotal += Date.now() - pauseStart; pauseStart = 0; }
+    tunerPanel.classList.remove('show');
+    tunerBackdrop.classList.remove('show');
+  }
+
+  tunerToggleBtn.addEventListener('click', () => openTuner());
+  document.getElementById('tunerClose').addEventListener('click', () => closeTuner());
+  tunerBackdrop.addEventListener('click', () => closeTuner());
+
+  // Build the tuner UI for current palette
+  function buildTunerUI() {
+    const pk = activePalette.key;
+    const p = activeParams[pk];
+    const currentVar = activeVariation[pk];
+    const universalDefs = PARAM_DEFS.universal;
+    const specificDefs = PARAM_DEFS[pk] || [];
+    const variations = VARIATIONS[pk];
+    const customPresets = loadCustomPresets();
+
+    tunerBody.innerHTML = '';
+
+    // Palette selector
+    const palLabel = document.createElement('div');
+    palLabel.className = 'tuner-section-label';
+    palLabel.textContent = `Base Palette: ${activePalette.name}`;
+    tunerBody.appendChild(palLabel);
+
+    // Variation chips
+    const chipsDiv = document.createElement('div');
+    chipsDiv.className = 'tuner-chips';
+
+    for (const name of Object.keys(variations)) {
+      const chip = document.createElement('button');
+      chip.className = 'tuner-chip' + (currentVar === name ? ' active' : '');
+      chip.textContent = name;
+      chip.addEventListener('click', () => {
+        applyVariation(pk, name, variations[name]);
+        buildTunerUI();
+      });
+      chipsDiv.appendChild(chip);
+    }
+
+    // Custom preset chips
+    for (const [name, preset] of Object.entries(customPresets)) {
+      if (preset.base !== pk) continue;
+      const chip = document.createElement('button');
+      chip.className = 'tuner-chip custom-preset' + (currentVar === name ? ' active' : '');
+      chip.textContent = name;
+      chip.addEventListener('click', () => {
+        applyVariation(pk, name, preset.params);
+        buildTunerUI();
+      });
+      // Long-press to delete
+      let pressTimer;
+      chip.addEventListener('pointerdown', () => {
+        pressTimer = setTimeout(() => {
+          if (confirm(`Delete preset "${name}"?`)) {
+            const cp = loadCustomPresets();
+            delete cp[name];
+            saveCustomPresets(cp);
+            if (activeVariation[pk] === name) activeVariation[pk] = 'Original';
+            buildTunerUI();
+          }
+        }, 600);
+      });
+      chip.addEventListener('pointerup', () => clearTimeout(pressTimer));
+      chip.addEventListener('pointerleave', () => clearTimeout(pressTimer));
+      chipsDiv.appendChild(chip);
+    }
+
+    tunerBody.appendChild(chipsDiv);
+
+    // Group params by group name
+    const allDefs = [...universalDefs, ...specificDefs];
+    const groups = {};
+    for (const def of allDefs) {
+      if (!groups[def.group]) groups[def.group] = [];
+      groups[def.group].push(def);
+    }
+
+    // Debounced auto-play on slider drag
+    let _tunerPlayTimer = null;
+    function debouncedTestPlay(groupName) {
+      clearTimeout(_tunerPlayTimer);
+      _tunerPlayTimer = setTimeout(() => {
+        if (testFns[groupName]) testFns[groupName]();
+      }, 180);
+    }
+
+    // Test sound functions per group
+    const testFns = {
+      'Tone': () => {
+        activePalette.startDraw(0);
+        setTimeout(() => activePalette.cellEnter(0, 2), 300);
+        setTimeout(() => activePalette.cellEnter(0, 4), 550);
+        setTimeout(() => activePalette.cellEnter(0, 6), 800);
+      },
+      'Volume': () => {
+        activePalette.startDraw(0);
+        setTimeout(() => activePalette.cellEnter(0, 2), 300);
+        setTimeout(() => activePalette.cellEnter(0, 3), 500);
+      },
+      'Pitch': () => {
+        activePalette.cellEnter(0, 1);
+        setTimeout(() => activePalette.cellEnter(0, 3), 250);
+        setTimeout(() => activePalette.cellEnter(0, 6), 500);
+        setTimeout(() => activePalette.cellEnter(0, 9), 750);
+      },
+      'Texture': () => {
+        activePalette.startDraw(2);
+        setTimeout(() => activePalette.cellEnter(2, 2), 350);
+        setTimeout(() => activePalette.pathComplete(2), 700);
+      },
+    };
+
+    for (const [groupName, defs] of Object.entries(groups)) {
+      const groupDiv = document.createElement('div');
+      groupDiv.className = 'tuner-group';
+
+      const header = document.createElement('div');
+      header.className = 'tuner-group-header';
+      const title = document.createElement('span');
+      title.className = 'tuner-group-title';
+      title.textContent = '\u25B8 ' + groupName;
+      header.appendChild(title);
+
+      const testBtn = document.createElement('button');
+      testBtn.className = 'tuner-group-test';
+      testBtn.innerHTML = '&#9654; test';
+      testBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (testFns[groupName]) testFns[groupName]();
+      });
+      header.appendChild(testBtn);
+
+      const body = document.createElement('div');
+      body.className = 'tuner-group-body';
+
+      header.addEventListener('click', () => {
+        body.classList.toggle('collapsed');
+        title.textContent = (body.classList.contains('collapsed') ? '\u25B8 ' : '\u25BE ') + groupName;
+      });
+
+      for (const def of defs) {
+        const row = document.createElement('div');
+        row.className = 'tuner-slider-row';
+
+        const label = document.createElement('span');
+        label.className = 'tuner-slider-label';
+        label.textContent = def.label;
+
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.min = def.min;
+        slider.max = def.max;
+        slider.step = def.step;
+        slider.value = p[def.key] ?? VARIATIONS[pk]['Original'][def.key] ?? def.min;
+
+        const valDisplay = document.createElement('span');
+        valDisplay.className = 'tuner-slider-val';
+        valDisplay.textContent = formatParamVal(slider.value, def);
+
+        slider.addEventListener('input', () => {
+          const v = parseFloat(slider.value);
+          p[def.key] = v;
+          valDisplay.textContent = formatParamVal(v, def);
+          // Switch to Custom if not already
+          if (activeVariation[pk] !== 'Custom') {
+            activeVariation[pk] = 'Custom';
+            tunerBody.querySelectorAll('.tuner-chip').forEach(c => c.classList.remove('active'));
+          }
+          debouncedTestPlay(def.group);
+        });
+
+        row.appendChild(label);
+        row.appendChild(slider);
+        row.appendChild(valDisplay);
+        body.appendChild(row);
+      }
+
+      groupDiv.appendChild(header);
+      groupDiv.appendChild(body);
+      tunerBody.appendChild(groupDiv);
+    }
+  }
+
+  function formatParamVal(val, def) {
+    const v = parseFloat(val);
+    if (def.step >= 1) return v.toFixed(0);
+    if (def.step >= 0.1) return v.toFixed(1);
+    return v.toFixed(3);
+  }
+
+  function applyVariation(pk, name, values) {
+    // Start with Original defaults, then overlay variation values
+    const orig = VARIATIONS[pk]['Original'];
+    activeParams[pk] = { ...orig, ...values };
+    activeVariation[pk] = name;
+  }
+
+  // Tuner action buttons
+  document.getElementById('tunerPreview').addEventListener('click', () => {
+    activePalette.preview();
+  });
+
+  document.getElementById('tunerReset').addEventListener('click', () => {
+    const pk = activePalette.key;
+    const varName = activeVariation[pk];
+    const variations = VARIATIONS[pk];
+    const customPresets = loadCustomPresets();
+    let values;
+    if (variations[varName]) {
+      values = variations[varName];
+    } else if (customPresets[varName] && customPresets[varName].base === pk) {
+      values = customPresets[varName].params;
+    } else {
+      values = variations['Original'];
+    }
+    applyVariation(pk, varName === 'Custom' ? 'Original' : varName, varName === 'Custom' ? variations['Original'] : values);
+    buildTunerUI();
+  });
+
+  document.getElementById('tunerCopy').addEventListener('click', () => {
+    const pk = activePalette.key;
+    const p = activeParams[pk];
+    const varName = activeVariation[pk];
+    const lines = [`// ${activePalette.name} — ${varName || 'Custom'}`];
+    lines.push(`'${varName || 'Custom'}': {`);
+    // Get all param keys in definition order
+    const allDefs = [...(PARAM_DEFS.universal || []), ...(PARAM_DEFS[pk] || [])];
+    for (const def of allDefs) {
+      const v = p[def.key];
+      if (v !== undefined) {
+        const formatted = def.step >= 1 ? v.toFixed(0) : (def.step >= 0.1 ? v.toFixed(1) : v.toFixed(3));
+        lines.push(`  ${def.key}: ${formatted},`);
+      }
+    }
+    lines.push('},');
+    const text = lines.join('\n');
+    navigator.clipboard.writeText(text).then(() => {
+      const btn = document.getElementById('tunerCopy');
+      const orig = btn.innerHTML;
+      btn.innerHTML = '✓ Copied!';
+      setTimeout(() => btn.innerHTML = orig, 1500);
+    });
+  });
+
+  document.getElementById('tunerSave').addEventListener('click', () => {
+    const name = prompt('Preset name:');
+    if (!name || !name.trim()) return;
+    const pk = activePalette.key;
+    const presets = loadCustomPresets();
+    presets[name.trim()] = { base: pk, params: { ...activeParams[pk] } };
+    saveCustomPresets(presets);
+    activeVariation[pk] = name.trim();
+    buildTunerUI();
+    // Rebuild palette list to show custom presets
+    buildPaletteList();
+  });
+
+  // Modify buildPaletteList to show custom presets
+  const _origBuildPaletteList = buildPaletteList;
+  buildPaletteList = function() {
+    _origBuildPaletteList();
+    // Add custom presets under their base palette
+    const listEl = document.getElementById('paletteList');
+    const customPresets = loadCustomPresets();
+    for (const [name, preset] of Object.entries(customPresets)) {
+      const pal = palettes[preset.base];
+      if (!pal) continue;
+      const row = document.createElement('div');
+      const isActive = activePalette === pal && activeVariation[preset.base] === name;
+      row.className = 'palette-row' + (isActive ? ' selected' : '');
+      row.innerHTML = `<div class="palette-info"><div class="palette-name">${pal.name} (${name})</div><div class="palette-desc">Custom preset</div></div><button class="palette-preview-btn" title="Preview">🔈</button>`;
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('.palette-preview-btn')) return;
+        activePalette = pal;
+        localStorage.setItem('vibe-sound-palette', pal.key);
+        applyVariation(preset.base, name, preset.params);
+        listEl.querySelectorAll('.palette-row').forEach(r => r.classList.remove('selected'));
+        row.classList.add('selected');
+        pal.preview();
+      });
+      row.querySelector('.palette-preview-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        // Temporarily apply preset for preview
+        const savedParams = { ...activeParams[preset.base] };
+        applyVariation(preset.base, name, preset.params);
+        pal.preview();
+        // Note: params stay applied — user selected this sound
+      });
+      listEl.appendChild(row);
+    }
+  };
+
+  // Block gameplay while tuner is open
+  const _origStartDraw = startDraw;
+  startDraw = function(r, c) {
+    if (isPaused) return;
+    _origStartDraw(r, c);
+  };
+
+  // --- Init ---
+  buildHelpExample();
+  updateHelpText();
+  updateRedrawCounter();
+  newGame();
+
+  // First-visit sequencing: vibe picker first, then help, then the board.
+  const needPalette = !localStorage.getItem('vibe-sound-palette');
+  const needHelp = !localStorage.getItem('flow-seen-help');
+  if (needPalette) {
+    pendingHelp = needHelp;
+    openSettings(true);
+  } else if (needHelp) {
+    helpOverlay.classList.add('show');
+  }
+})();
+</script>
+</body>
+</html>

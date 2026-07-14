@@ -1,0 +1,3062 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Orbital Impact</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #06060f;
+    color: #e0e0e0;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    min-height: 100dvh;
+    overflow: hidden;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: none;
+  }
+
+  /* ── Desktop layout ── */
+  h1 {
+    font-size: 1.8rem;
+    margin: 10px 0 2px;
+    color: #00ffff;
+    text-shadow: 0 0 30px rgba(0, 255, 255, 0.5);
+    letter-spacing: 4px;
+  }
+
+  .subtitle {
+    color: #446;
+    font-size: 0.75rem;
+    margin-bottom: 6px;
+    font-style: italic;
+  }
+
+  .game-wrap {
+    position: relative;
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    justify-content: center;
+    width: 100%;
+    padding: 0 8px;
+    flex: 1;
+  }
+
+  #game {
+    border-radius: 50%;
+    box-shadow: 0 0 80px rgba(0, 100, 255, 0.15);
+    cursor: none;
+    max-width: min(640px, calc(100vw - 16px));
+    max-height: min(640px, calc(100vw - 16px));
+    width: auto;
+    height: auto;
+    touch-action: none;
+  }
+
+  /* Desktop side HUD */
+  .hud {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 140px;
+    font-size: 0.75rem;
+  }
+
+  .hud-box {
+    background: #0a0a1e;
+    border: 1px solid #1a1a3a;
+    border-radius: 6px;
+    padding: 7px 10px;
+  }
+
+  .hud-label {
+    font-size: 0.6rem;
+    color: #446;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .hud-val {
+    font-size: 1.2rem;
+    font-weight: bold;
+  }
+
+  .c-score { color: #00ffff; }
+  .c-level { color: #ff2d95; }
+  .c-lives { color: #ff6600; }
+  .c-combo { color: #b44dff; }
+  .c-bricks { color: #ffe600; }
+  .c-best { color: #ffe600; }
+
+  .pu-legend {
+    font-size: 0.65rem;
+    color: #557;
+    line-height: 1.7;
+  }
+  .pu-legend span { font-size: 0.8rem; }
+
+  /* ── Mobile compact HUD bar ── */
+  .mobile-hud {
+    display: none;
+    width: 100%;
+    padding: 6px 12px;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(10, 10, 30, 0.9);
+    border-bottom: 1px solid #1a1a3a;
+    font-size: 1.1rem;
+    font-weight: bold;
+    gap: 8px;
+    z-index: 10;
+    flex-shrink: 0;
+  }
+
+  .mobile-hud .mh-item {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
+
+  .mobile-hud .mh-score { color: #00ffff; }
+  .mobile-hud .mh-level { color: #ff2d95; }
+  .mobile-hud .mh-lives { color: #ff6600; font-size: 0.95rem; }
+  .mobile-hud .mh-combo { color: #b44dff; }
+  .mobile-hud .mh-best { color: #ffe600; font-size: 0.85rem; opacity: 0.7; }
+  .mobile-hud .mh-powerup { font-size: 0.8rem; font-weight: normal; text-transform: uppercase; letter-spacing: 1px; }
+  .mobile-hud .mh-pause { cursor: pointer; font-size: 1.2rem; padding: 4px 8px; opacity: 0.7; }
+
+  /* Touch control zone */
+  .touch-zone {
+    display: none;
+    width: min(180px, 40vw);
+    height: min(180px, 40vw);
+    flex-shrink: 0;
+    position: relative;
+    touch-action: none;
+    border: 1px solid rgba(0, 180, 255, 0.4);
+    border-radius: 50%;
+    box-shadow: inset 0 0 24px rgba(0, 180, 255, 0.15), 0 0 14px rgba(0, 180, 255, 0.12);
+    margin: 8px auto;
+    transition: box-shadow 0.8s, border-color 0.8s;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .touch-zone.subtle {
+    border-color: rgba(0, 180, 255, 0.18);
+    box-shadow: inset 0 0 14px rgba(0, 180, 255, 0.06), 0 0 8px rgba(0, 180, 255, 0.04);
+  }
+
+  .touch-dot {
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: rgba(0, 255, 255, 0.8);
+    box-shadow: 0 0 10px rgba(0, 255, 255, 0.6);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .touch-dot.visible {
+    opacity: 1;
+  }
+
+  /* ── Mobile overrides ── */
+  @media (max-width: 820px) {
+    h1 { display: none; }
+    .subtitle { display: none; }
+
+    .mobile-hud { display: flex; }
+    .touch-zone { display: flex; }
+
+    .game-wrap {
+      flex-direction: column;
+      align-items: center;
+      flex: 0;
+      padding: 0;
+    }
+
+    /* Hide desktop side HUD on mobile */
+    .hud { display: none; }
+
+    #game {
+      max-width: min(640px, 100vw);
+      max-height: min(640px, 100vw);
+    }
+  }
+
+  /* ── Overlays ── */
+  .overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(2,2,15,0.92);
+    z-index: 100;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .overlay.show { display: flex; }
+
+  .overlay h2 {
+    font-size: 2.8rem;
+    margin-bottom: 8px;
+    color: #00ffff;
+    text-shadow: 0 0 40px rgba(0,221,255,0.6);
+  }
+
+  .overlay .stats {
+    color: #668;
+    margin-bottom: 18px;
+    text-align: center;
+    line-height: 2;
+    font-size: 0.95rem;
+  }
+  .overlay .stats strong { color: #aac; }
+
+  .overlay button {
+    background: linear-gradient(135deg, #00ccdd, #00ffff);
+    color: #06060f;
+    border: none;
+    border-radius: 8px;
+    padding: 16px 44px;
+    font-size: 1.15rem;
+    font-weight: bold;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    box-shadow: 0 0 25px rgba(0,221,255,0.3);
+    transition: transform 0.15s, box-shadow 0.15s;
+    min-height: 52px;
+  }
+  .overlay button:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 40px rgba(0,221,255,0.5);
+  }
+  .overlay .share-btn {
+    margin-top: 12px;
+    background: none;
+    color: #8fc4e6;
+    border: 1px solid #3a5f80;
+    box-shadow: none;
+    padding: 12px 32px;
+    font-size: 0.9rem;
+    min-height: 44px;
+  }
+  .overlay .share-btn:hover {
+    transform: scale(1.04);
+    box-shadow: 0 0 20px rgba(0,221,255,0.25);
+    color: #cfeaff;
+    border-color: #5a9fd4;
+  }
+
+  .start-overlay {
+    display: flex;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(2,2,15,0.7);
+    backdrop-filter: blur(2px);
+    z-index: 200;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .start-overlay.hide { display: none; }
+
+  .start-overlay h2 {
+    font-size: 3.5rem;
+    color: #fff;
+    text-shadow:
+      0 0 10px rgba(0,255,255,0.8),
+      0 0 30px rgba(0,255,255,0.5),
+      0 0 60px rgba(0,255,255,0.3),
+      0 0 100px rgba(0,255,255,0.15);
+    letter-spacing: 8px;
+    margin-bottom: 6px;
+  }
+  .start-overlay .tagline {
+    color: #ff2d95;
+    font-size: 1rem;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    text-shadow: 0 0 20px rgba(255,45,149,0.5);
+    margin-bottom: 24px;
+  }
+  .start-overlay .how-to {
+    color: rgba(255,255,255,0.55);
+    font-size: 0.85rem;
+    margin-bottom: 6px;
+    letter-spacing: 1px;
+  }
+  .start-overlay .controls-hint {
+    color: rgba(255,255,255,0.3);
+    font-size: 0.7rem;
+    margin-bottom: 20px;
+    letter-spacing: 1px;
+  }
+  .start-overlay .best-score {
+    color: #ffe600;
+    font-size: 0.85rem;
+    margin-bottom: 16px;
+    text-shadow: 0 0 15px rgba(255,230,0,0.3);
+  }
+  .start-overlay button {
+    min-height: 56px;
+    padding: 18px 52px;
+    font-size: 1.2rem;
+    letter-spacing: 3px;
+    text-shadow: 0 0 10px rgba(0,255,255,0.3);
+  }
+
+  .level-select {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .level-select label {
+    color: #557;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .level-select select {
+    background: #0a0a1e;
+    color: #00ffff;
+    border: 1px solid #1a1a3a;
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-size: 1rem;
+    font-family: inherit;
+    cursor: pointer;
+    outline: none;
+  }
+  .level-select select:focus {
+    border-color: #00ffff;
+    box-shadow: 0 0 10px rgba(0,221,255,0.3);
+  }
+
+  .mute-btn {
+    position: fixed;
+    top: 8px;
+    right: 12px;
+    background: rgba(10, 20, 40, 0.6);
+    border: 1px solid #3a5f80;
+    color: #8fc4e6;
+    font-size: 1.1rem;
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    z-index: 300;
+    min-width: 40px;
+    min-height: 36px;
+  }
+  .mute-btn:hover { color: #cfeaff; border-color: #5a9fd4; }
+
+  .pause-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(2,2,15,0.88);
+    z-index: 150;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .pause-overlay.show { display: flex; }
+  .pause-overlay h2 {
+    font-size: 2.8rem;
+    color: #00ffff;
+    text-shadow: 0 0 40px rgba(0,221,255,0.6);
+    margin-bottom: 12px;
+    letter-spacing: 6px;
+  }
+  .pause-overlay p {
+    color: #557;
+    font-size: 0.85rem;
+    margin-bottom: 20px;
+  }
+  .pause-overlay button {
+    background: linear-gradient(135deg, #00ccdd, #00ffff);
+    color: #06060f;
+    border: none;
+    border-radius: 8px;
+    padding: 16px 44px;
+    font-size: 1.15rem;
+    font-weight: bold;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    box-shadow: 0 0 25px rgba(0,221,255,0.3);
+    transition: transform 0.15s, box-shadow 0.15s;
+    min-height: 52px;
+  }
+  .pause-overlay button:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 40px rgba(0,221,255,0.5);
+  }
+
+  @media (max-width: 820px) {
+    .overlay h2 { font-size: 2.2rem; }
+    .start-overlay h2 { font-size: 2.2rem; letter-spacing: 4px; white-space: nowrap; }
+    .start-overlay .tagline { font-size: 0.85rem; letter-spacing: 3px; }
+    .start-overlay .how-to { font-size: 0.75rem; }
+    .start-overlay .controls-hint { font-size: 0.65rem; }
+    .pause-overlay h2 { font-size: 2.2rem; letter-spacing: 3px; }
+  }
+</style>
+</head>
+<body>
+
+<h1>ORBITAL IMPACT</h1>
+<p class="subtitle">Shatter the rings.</p>
+
+<button class="mute-btn" id="muteBtn" onclick="toggleMute()">🔊</button>
+
+<!-- Mobile compact HUD bar -->
+<div class="mobile-hud" id="mobileHud">
+  <div class="mh-item mh-score"><span id="mhScore">0</span></div>
+  <div class="mh-item mh-level">Lv <span id="mhLevel">1</span></div>
+  <div class="mh-item mh-lives" id="mhLives">❤️❤️❤️</div>
+  <div class="mh-item mh-combo" id="mhCombo"></div>
+  <div class="mh-item mh-best" id="mhBest"></div>
+  <div class="mh-item mh-powerup" id="mhPowerup"></div>
+  <div class="mh-item mh-pause" id="mhPause" onclick="if(gameStarted && !gameOverFlag) togglePause()">⏸</div>
+</div>
+
+<div class="game-wrap">
+  <canvas id="game" width="640" height="640"></canvas>
+  <div class="hud">
+    <div class="hud-box">
+      <div class="hud-label">Score</div>
+      <div class="hud-val c-score" id="hScore">0</div>
+    </div>
+    <div class="hud-box">
+      <div class="hud-label">Level</div>
+      <div class="hud-val c-level" id="hLevel">1</div>
+    </div>
+    <div class="hud-box">
+      <div class="hud-label">Lives</div>
+      <div class="hud-val c-lives" id="hLives">❤️❤️❤️</div>
+    </div>
+    <div class="hud-box">
+      <div class="hud-label">Combo</div>
+      <div class="hud-val c-combo" id="hCombo">—</div>
+    </div>
+    <div class="hud-box">
+      <div class="hud-label">Bricks</div>
+      <div class="hud-val c-bricks" id="hBricks">0</div>
+    </div>
+    <div class="hud-box">
+      <div class="hud-label">Best</div>
+      <div class="hud-val c-best" id="hBest">—</div>
+    </div>
+    <div class="hud-box pu-legend">
+      <div class="hud-label">Power-ups</div>
+      <span style="color:#00ffff">●</span> Multi-ball<br>
+      <span style="color:#00ffff">●</span> Big paddle<br>
+      <span style="color:#ffe600">●</span> Fireball<br>
+      <span style="color:#b44dff">●</span> Slow-mo<br>
+      <span style="color:#ff6600">●</span> Laser<br>
+      <span style="color:#b44dff">●</span> Shield
+    </div>
+  </div>
+</div>
+
+<!-- Touch control zone (mobile only) -->
+<div class="touch-zone" id="touchZone">
+  <div class="touch-dot" id="touchDot"></div>
+</div>
+
+<div class="start-overlay" id="startOverlay">
+  <h2>ORBITAL IMPACT</h2>
+  <p class="tagline">Shatter the rings</p>
+  <p class="how-to">Bounce the ball · Break every ring · Survive</p>
+  <p class="controls-hint" id="controlsHint">Move your mouse to orbit the paddle · P to pause</p>
+  <p class="best-score" id="startBest"></p>
+  <div class="level-select">
+    <label for="levelSelect">Start at</label>
+    <select id="levelSelect"></select>
+  </div>
+  <button onclick="startGame()">LAUNCH</button>
+</div>
+
+<div class="pause-overlay" id="pauseOverlay">
+  <h2>PAUSED</h2>
+  <p>Press P or tap to resume</p>
+  <button onclick="resumeGame()">RESUME</button>
+</div>
+
+<div class="overlay" id="overlay">
+  <h2 id="oTitle">GAME OVER</h2>
+  <div class="stats" id="oStats"></div>
+  <button onclick="restartGame()">PLAY AGAIN</button>
+  <button class="share-btn" id="shareBtn" onclick="shareScore()">SHARE SCORE</button>
+</div>
+
+<script>
+// ─── PORTAL SDK ABSTRACTION ──────────────────────────────
+// Detects Poki, CrazyGames, or standalone. Thin wrapper so
+// game code calls portal.X() without caring which platform.
+const portal = {
+  _ready: false,
+  _isPoki: typeof window.PokiSDK !== 'undefined',
+  _isCrazy: typeof window.CrazyGames !== 'undefined' && !!window.CrazyGames.SDK,
+
+  async init() {
+    try {
+      if (this._isPoki) {
+        await PokiSDK.init();
+        this._ready = true;
+      } else if (this._isCrazy) {
+        await CrazyGames.SDK.init();
+        this._ready = true;
+      }
+    } catch(e) {
+      // SDK unavailable — game runs standalone
+      this._ready = false;
+    }
+  },
+  gameplayStart() {
+    if (!this._ready) return;
+    try {
+      if (this._isPoki) PokiSDK.gameplayStart();
+      else if (this._isCrazy) CrazyGames.SDK.game.gameplayStart();
+    } catch(e) {}
+  },
+  gameplayStop() {
+    if (!this._ready) return;
+    try {
+      if (this._isPoki) PokiSDK.gameplayStop();
+      else if (this._isCrazy) CrazyGames.SDK.game.gameplayStop();
+    } catch(e) {}
+  },
+  async showAd() {
+    if (!this._ready) return;
+    try {
+      if (this._isPoki) {
+        await PokiSDK.commercialBreak();
+      } else if (this._isCrazy) {
+        await new Promise((resolve) => {
+          CrazyGames.SDK.ad.requestAd('midgame', {
+            adStarted: () => {},
+            adFinished: () => resolve(),
+            adError: () => resolve()
+          });
+        });
+      }
+    } catch(e) {}
+  },
+  gameLoadingFinished() {
+    if (!this._ready) return;
+    try {
+      if (this._isPoki) PokiSDK.gameLoadingFinished();
+      else if (this._isCrazy) CrazyGames.SDK.game.loadingStop();
+    } catch(e) {}
+  }
+};
+portal.init().then(() => portal.gameLoadingFinished());
+
+// ─── DANCE SYNTH AUDIO ENGINE ─────────────────────────────
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+const GAMELAB_MUTED = new URLSearchParams(window.location.search).has('mute');
+const DEV = new URLSearchParams(window.location.search).has('dev'); // ?dev enables the level picker + in-game level-skip keys
+let audioCtx = null;
+let muted = false;
+
+// Master bus nodes
+let masterGain, masterFilter, masterComp, delayNode, delayFeedback, delayWet, reverbNode, reverbWet;
+let sidechainGain; // for pumping effect
+let gameFilterCutoff = 4000; // reactive — combo opens this up
+
+function initAudio() {
+  if (audioCtx) { if (audioCtx.state === 'suspended' && !GAMELAB_MUTED) audioCtx.resume(); return; }
+  if (GAMELAB_MUTED) return;
+  audioCtx = new AudioCtx();
+
+  // Master compressor — glues everything together
+  masterComp = audioCtx.createDynamicsCompressor();
+  masterComp.threshold.value = -18;
+  masterComp.knee.value = 8;
+  masterComp.ratio.value = 6;
+  masterComp.attack.value = 0.003;
+  masterComp.release.value = 0.15;
+
+  // Master filter — reactive to gameplay
+  masterFilter = audioCtx.createBiquadFilter();
+  masterFilter.type = 'lowpass';
+  masterFilter.frequency.value = gameFilterCutoff;
+  masterFilter.Q.value = 1.5;
+
+  // Sidechain gain — pumps on kick
+  sidechainGain = audioCtx.createGain();
+  sidechainGain.gain.value = 1.0;
+
+  // Master gain
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = 0.7;
+
+  // Delay effect
+  delayNode = audioCtx.createDelay(1.0);
+  delayNode.delayTime.value = 60 / 130 / 2; // 1/8 note at 130 BPM
+  delayFeedback = audioCtx.createGain();
+  delayFeedback.gain.value = 0.3;
+  delayWet = audioCtx.createGain();
+  delayWet.gain.value = 0.15;
+  delayNode.connect(delayFeedback).connect(delayNode);
+  delayNode.connect(delayWet);
+
+  // Simple algorithmic reverb via multiple delays
+  reverbWet = audioCtx.createGain();
+  reverbWet.gain.value = 0.12;
+  const rvbDelays = [0.031, 0.037, 0.041, 0.053];
+  rvbDelays.forEach(t => {
+    const d = audioCtx.createDelay(0.1);
+    d.delayTime.value = t;
+    const fb = audioCtx.createGain();
+    fb.gain.value = 0.4;
+    const filt = audioCtx.createBiquadFilter();
+    filt.type = 'lowpass';
+    filt.frequency.value = 3000;
+    masterFilter.connect(d).connect(fb).connect(d);
+    d.connect(filt).connect(reverbWet);
+  });
+
+  // Signal chain: source → masterFilter → sidechainGain → masterComp → masterGain → destination
+  //                                    ↘ delayNode → delayWet ↗
+  //                                    ↘ reverb taps → reverbWet ↗
+  masterFilter.connect(sidechainGain);
+  masterFilter.connect(delayNode);
+  sidechainGain.connect(masterComp);
+  delayWet.connect(masterComp);
+  reverbWet.connect(masterComp);
+  masterComp.connect(masterGain);
+  masterGain.connect(audioCtx.destination);
+}
+
+function toggleMute() {
+  muted = !muted;
+  document.getElementById('muteBtn').textContent = muted ? '🔇' : '🔊';
+  if (masterGain) masterGain.gain.value = muted ? 0 : 0.7;
+}
+
+// Reflect the ?mute URL-param state on load — the button showed 🔊 even when muted that way
+if (GAMELAB_MUTED) {
+  muted = true;
+  const _mb = document.getElementById('muteBtn');
+  if (_mb) _mb.textContent = '🔇';
+}
+
+// ─── SYNTH PRIMITIVES ─────────────────────────────────────
+
+function now() { return audioCtx.currentTime; }
+
+// Supersaw — the classic dance synth sound (multiple detuned saws)
+function supersaw(freq, startTime, dur, vol = 0.06, detune = 12) {
+  if (muted || !audioCtx) return null;
+  const voices = 5;
+  const mix = audioCtx.createGain();
+  mix.gain.setValueAtTime(vol, startTime);
+  const oscs = [];
+  for (let i = 0; i < voices; i++) {
+    const osc = audioCtx.createOscillator();
+    osc.type = 'sawtooth';
+    const spread = (i / (voices - 1) - 0.5) * 2; // -1 to 1
+    osc.detune.setValueAtTime(spread * detune, startTime);
+    osc.frequency.setValueAtTime(freq, startTime);
+    osc.connect(mix);
+    osc.start(startTime);
+    osc.stop(startTime + dur + 0.05);
+    oscs.push(osc);
+  }
+  return { mix, oscs };
+}
+
+// Filtered noise burst (for hats, snares, zaps)
+function noiseBurst(startTime, dur, vol = 0.05, hipass = 5000) {
+  if (muted || !audioCtx) return;
+  const bufSize = audioCtx.sampleRate * dur;
+  const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  const filt = audioCtx.createBiquadFilter();
+  filt.type = 'highpass';
+  filt.frequency.value = hipass;
+  filt.Q.value = 2;
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(vol, startTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, startTime + dur);
+  src.connect(filt).connect(gain).connect(masterFilter);
+  src.start(startTime);
+}
+
+// Synth kick drum — sine with pitch drop + click transient
+function synthKick(startTime, vol = 0.35) {
+  if (muted || !audioCtx) return;
+  // Sub body
+  const osc = audioCtx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(150, startTime);
+  osc.frequency.exponentialRampToValueAtTime(40, startTime + 0.08);
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(vol, startTime);
+  gain.gain.setValueAtTime(vol * 0.8, startTime + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.3);
+  // Click transient
+  const click = audioCtx.createOscillator();
+  click.type = 'square';
+  click.frequency.setValueAtTime(1200, startTime);
+  click.frequency.exponentialRampToValueAtTime(100, startTime + 0.01);
+  const clickGain = audioCtx.createGain();
+  clickGain.gain.setValueAtTime(vol * 0.4, startTime);
+  clickGain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.02);
+  osc.connect(gain).connect(masterFilter);
+  click.connect(clickGain).connect(masterFilter);
+  osc.start(startTime);
+  osc.stop(startTime + 0.35);
+  click.start(startTime);
+  click.stop(startTime + 0.03);
+
+  // Sidechain pump — duck everything else on kick
+  sidechainGain.gain.setValueAtTime(0.3, startTime);
+  sidechainGain.gain.linearRampToValueAtTime(1.0, startTime + 0.12);
+}
+
+// Simple tone (still useful for quick sounds)
+function playTone(freq, dur, type = 'square', vol = 0.08, filterFreq = null) {
+  if (muted || !audioCtx) return;
+  const t = now();
+  const osc = audioCtx.createOscillator();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, t);
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(vol, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  if (filterFreq) {
+    const filt = audioCtx.createBiquadFilter();
+    filt.type = 'lowpass';
+    filt.frequency.setValueAtTime(filterFreq, t);
+    filt.frequency.exponentialRampToValueAtTime(200, t + dur);
+    filt.Q.value = 5;
+    osc.connect(filt).connect(gain).connect(masterFilter);
+  } else {
+    osc.connect(gain).connect(masterFilter);
+  }
+  osc.start(t);
+  osc.stop(t + dur + 0.01);
+}
+
+// ─── DANCE SFX ────────────────────────────────────────────
+
+function sfxHit(combo) {
+  if (muted || !audioCtx) return;
+  const t = now();
+  const baseFreq = 300 + combo * 50;
+  // Resonant filter ping — the "pluck" sound
+  const osc = audioCtx.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(baseFreq, t);
+  const filt = audioCtx.createBiquadFilter();
+  filt.type = 'bandpass';
+  filt.frequency.setValueAtTime(baseFreq * 3, t);
+  filt.frequency.exponentialRampToValueAtTime(baseFreq, t + 0.1);
+  filt.Q.value = 8 + combo;
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(0.07, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+  osc.connect(filt).connect(gain).connect(masterFilter);
+  osc.start(t);
+  osc.stop(t + 0.12);
+  // Sub click
+  playTone(baseFreq / 2, 0.04, 'sine', 0.04);
+}
+
+function sfxBreak(combo) {
+  const t = now();
+  const freq = 400 + combo * 40;
+  // Supersaw burst with filter sweep
+  const ss = supersaw(freq, t, 0.15, 0.05 + combo * 0.005, 15 + combo * 2);
+  if (!ss) return;
+  const filt = audioCtx.createBiquadFilter();
+  filt.type = 'lowpass';
+  filt.frequency.setValueAtTime(freq * 6, t);
+  filt.frequency.exponentialRampToValueAtTime(200, t + 0.15);
+  filt.Q.value = 6;
+  const env = audioCtx.createGain();
+  env.gain.setValueAtTime(1, t);
+  env.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+  ss.mix.connect(filt).connect(env).connect(masterFilter);
+  // Noise snap for impact
+  noiseBurst(t, 0.04, 0.04, 3000);
+}
+
+function sfxPowerup() {
+  const t = now();
+  // Rising supersaw sweep — euphoric riser
+  const ss = supersaw(300, t, 0.4, 0.06, 20);
+  if (!ss) return;
+  ss.oscs.forEach(osc => {
+    osc.frequency.exponentialRampToValueAtTime(1200, t + 0.35);
+  });
+  const filt = audioCtx.createBiquadFilter();
+  filt.type = 'lowpass';
+  filt.frequency.setValueAtTime(400, t);
+  filt.frequency.exponentialRampToValueAtTime(8000, t + 0.35);
+  filt.Q.value = 4;
+  const env = audioCtx.createGain();
+  env.gain.setValueAtTime(0.8, t);
+  env.gain.setValueAtTime(1, t + 0.15);
+  env.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+  ss.mix.connect(filt).connect(env).connect(masterFilter);
+  // Sparkle on top
+  noiseBurst(t + 0.25, 0.1, 0.03, 8000);
+}
+
+function sfxLaunch() {
+  if (muted || !audioCtx) return;
+  const t = now();
+  // Sub whoosh + saw attack
+  const osc = audioCtx.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(80, t);
+  osc.frequency.exponentialRampToValueAtTime(400, t + 0.08);
+  const filt = audioCtx.createBiquadFilter();
+  filt.type = 'lowpass';
+  filt.frequency.setValueAtTime(2000, t);
+  filt.frequency.exponentialRampToValueAtTime(400, t + 0.15);
+  filt.Q.value = 3;
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(0.08, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+  osc.connect(filt).connect(gain).connect(masterFilter);
+  osc.start(t);
+  osc.stop(t + 0.2);
+  noiseBurst(t, 0.03, 0.03, 2000);
+}
+
+function sfxBounce(intensity = 1) {
+  if (muted || !audioCtx) return;
+  const t = now();
+  // Short filtered thump with sub — presence scales with impact intensity
+  const osc = audioCtx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(250 * (0.9 + 0.2 * intensity), t);
+  osc.frequency.exponentialRampToValueAtTime(120, t + 0.04);
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(Math.min(0.1, 0.06 * intensity), t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+  osc.connect(gain).connect(masterFilter);
+  osc.start(t);
+  osc.stop(t + 0.08);
+}
+
+// Soft descending blip when a built-up combo fades on a paddle bounce
+function sfxComboBreak(combo) {
+  if (muted || !audioCtx) return;
+  const t = now();
+  const osc = audioCtx.createOscillator();
+  osc.type = 'triangle';
+  const startF = 400 + Math.min(combo, 12) * 40;
+  osc.frequency.setValueAtTime(startF, t);
+  osc.frequency.exponentialRampToValueAtTime(startF * 0.5, t + 0.18);
+  const filt = audioCtx.createBiquadFilter();
+  filt.type = 'lowpass';
+  filt.frequency.setValueAtTime(2200, t);
+  filt.frequency.exponentialRampToValueAtTime(400, t + 0.18);
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(0.05, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+  osc.connect(filt).connect(gain).connect(masterFilter);
+  osc.start(t);
+  osc.stop(t + 0.22);
+}
+
+function sfxDeath() {
+  const t = now();
+  // Descending supersaw with filter close — dramatic
+  const ss = supersaw(400, t, 0.6, 0.08, 25);
+  if (!ss) return;
+  ss.oscs.forEach(osc => {
+    osc.frequency.exponentialRampToValueAtTime(60, t + 0.5);
+  });
+  const filt = audioCtx.createBiquadFilter();
+  filt.type = 'lowpass';
+  filt.frequency.setValueAtTime(6000, t);
+  filt.frequency.exponentialRampToValueAtTime(100, t + 0.5);
+  filt.Q.value = 8;
+  const env = audioCtx.createGain();
+  env.gain.setValueAtTime(1, t);
+  env.gain.exponentialRampToValueAtTime(0.001, t + 0.65);
+  ss.mix.connect(filt).connect(env).connect(masterFilter);
+  // Noise wash
+  noiseBurst(t, 0.3, 0.04, 1000);
+}
+
+function sfxLevelClear() {
+  const t = now();
+  // Euphoric trance arp — rising notes with supersaw
+  const notes = [0, 4, 7, 12, 16]; // major + octave up
+  const baseFreq = 440;
+  notes.forEach((semitone, i) => {
+    const freq = baseFreq * Math.pow(2, semitone / 12);
+    const startAt = t + i * 0.09;
+    const ss = supersaw(freq, startAt, 0.25, 0.045, 18);
+    if (!ss) return;
+    const filt = audioCtx.createBiquadFilter();
+    filt.type = 'lowpass';
+    filt.frequency.setValueAtTime(freq * 4, startAt);
+    filt.frequency.exponentialRampToValueAtTime(freq, startAt + 0.2);
+    filt.Q.value = 3;
+    const env = audioCtx.createGain();
+    env.gain.setValueAtTime(1, startAt);
+    env.gain.exponentialRampToValueAtTime(0.001, startAt + 0.3);
+    ss.mix.connect(filt).connect(env).connect(masterFilter);
+  });
+  // Final sparkle burst
+  noiseBurst(t + 0.4, 0.15, 0.03, 7000);
+}
+
+function sfxLaser() {
+  if (muted || !audioCtx) return;
+  const t = now();
+  // Resonant filter zap
+  const osc = audioCtx.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(800, t);
+  osc.frequency.exponentialRampToValueAtTime(2400, t + 0.03);
+  osc.frequency.exponentialRampToValueAtTime(600, t + 0.06);
+  const filt = audioCtx.createBiquadFilter();
+  filt.type = 'bandpass';
+  filt.frequency.setValueAtTime(4000, t);
+  filt.Q.value = 12;
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(0.05, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
+  osc.connect(filt).connect(gain).connect(masterFilter);
+  osc.start(t);
+  osc.stop(t + 0.08);
+}
+
+function sfxBossHit() {
+  if (muted || !audioCtx) return;
+  const t = now();
+  // Heavy sub impact with distorted saw layer
+  const sub = audioCtx.createOscillator();
+  sub.type = 'sine';
+  sub.frequency.setValueAtTime(60, t);
+  sub.frequency.exponentialRampToValueAtTime(30, t + 0.2);
+  const subGain = audioCtx.createGain();
+  subGain.gain.setValueAtTime(0.15, t);
+  subGain.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+  sub.connect(subGain).connect(masterFilter);
+  sub.start(t);
+  sub.stop(t + 0.3);
+  // Saw crunch layer
+  const ss = supersaw(80, t, 0.12, 0.06, 30);
+  if (!ss) return;
+  const filt = audioCtx.createBiquadFilter();
+  filt.type = 'lowpass';
+  filt.frequency.setValueAtTime(3000, t);
+  filt.frequency.exponentialRampToValueAtTime(100, t + 0.12);
+  filt.Q.value = 10;
+  const env = audioCtx.createGain();
+  env.gain.setValueAtTime(1, t);
+  env.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+  ss.mix.connect(filt).connect(env).connect(masterFilter);
+  // Impact noise
+  noiseBurst(t, 0.05, 0.06, 800);
+}
+
+// ─── BEAT SEQUENCER ───────────────────────────────────────
+const BPM = 130;
+const STEP_TIME = 60 / BPM / 4; // 16th note duration
+let beatTimer = null;
+let beatStep = 0;
+let bossMode = false; // half-time feel for boss levels
+
+// Bass note patterns (MIDI-style, relative to root)
+const bassPatterns = [
+  [0, 0, 12, 0, 7, 7, 5, 0, 0, 0, 12, 0, 5, 7, 10, 0],     // driving
+  [0, 0, 0, 12, 0, 0, 7, 0, 5, 0, 0, 12, 0, 7, 0, 5],       // spacey
+  [0, 12, 0, 7, 0, 5, 0, 3, 0, 12, 7, 0, 5, 3, 0, 0],       // descending
+];
+let currentBassPattern = 0;
+const ROOT_NOTE = 55; // A1
+
+// Hi-hat patterns: 0=off, 1=closed, 2=open
+const hatPatterns = [
+  [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1],
+  [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
+  [1, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 2],
+];
+let currentHatPattern = 0;
+
+// Synth stab pattern: chord hits on certain steps
+const stabPattern = [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0];
+
+function playBassNote(semitone, startTime) {
+  if (muted || !audioCtx) return;
+  if (semitone === -1) return; // rest
+  const freq = ROOT_NOTE * Math.pow(2, semitone / 12);
+  const osc1 = audioCtx.createOscillator();
+  const osc2 = audioCtx.createOscillator();
+  osc1.type = 'sawtooth';
+  osc2.type = 'sawtooth';
+  osc1.frequency.setValueAtTime(freq, startTime);
+  osc2.frequency.setValueAtTime(freq, startTime);
+  osc2.detune.setValueAtTime(7, startTime);
+  const filt = audioCtx.createBiquadFilter();
+  filt.type = 'lowpass';
+  filt.frequency.setValueAtTime(800 + (gameFilterCutoff / 8000) * 1200, startTime);
+  filt.frequency.exponentialRampToValueAtTime(200, startTime + STEP_TIME * 0.9);
+  filt.Q.value = 5;
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(0.08, startTime);
+  gain.gain.setValueAtTime(0.06, startTime + STEP_TIME * 0.3);
+  gain.gain.exponentialRampToValueAtTime(0.001, startTime + STEP_TIME * 0.95);
+  osc1.connect(filt);
+  osc2.connect(filt);
+  filt.connect(gain).connect(masterFilter);
+  osc1.start(startTime);
+  osc2.start(startTime);
+  osc1.stop(startTime + STEP_TIME);
+  osc2.stop(startTime + STEP_TIME);
+}
+
+function playHat(type, startTime) {
+  const dur = type === 2 ? 0.12 : 0.04;
+  const vol = type === 2 ? 0.04 : 0.025;
+  noiseBurst(startTime, dur, vol, type === 2 ? 6000 : 9000);
+}
+
+function playSynthStab(startTime) {
+  // Major chord supersaw stab
+  const chords = [
+    [0, 4, 7],    // major
+    [0, 3, 7],    // minor
+    [0, 5, 7],    // sus4
+    [0, 4, 7, 11] // maj7
+  ];
+  const chord = chords[currentBassPattern % chords.length];
+  const baseFreq = ROOT_NOTE * 4; // Two octaves up from bass
+  chord.forEach(semitone => {
+    const freq = baseFreq * Math.pow(2, semitone / 12);
+    const ss = supersaw(freq, startTime, 0.15, 0.02, 10);
+    if (!ss) return;
+    const filt = audioCtx.createBiquadFilter();
+    filt.type = 'lowpass';
+    filt.frequency.setValueAtTime(3000, startTime);
+    filt.frequency.exponentialRampToValueAtTime(500, startTime + 0.15);
+    filt.Q.value = 2;
+    const env = audioCtx.createGain();
+    env.gain.setValueAtTime(1, startTime);
+    env.gain.exponentialRampToValueAtTime(0.001, startTime + 0.18);
+    ss.mix.connect(filt).connect(env).connect(masterFilter);
+  });
+}
+
+function beatTick() {
+  if (muted || !audioCtx || gameOverFlag) return;
+  const t = now();
+  const step = beatStep % 16;
+  const effectiveStep = bossMode ? (step % 2 === 0 ? step / 2 : -1) : step;
+
+  // Kick on beats 0, 4, 8, 12 (four on the floor)
+  if (step % 4 === 0) {
+    synthKick(t, bossMode ? 0.4 : 0.3);
+  }
+
+  // Bass
+  const bassNote = bassPatterns[currentBassPattern % bassPatterns.length][step];
+  if (bassNote !== undefined && (!bossMode || step % 2 === 0)) {
+    playBassNote(bassNote, t);
+  }
+
+  // Hi-hats
+  const hat = hatPatterns[currentHatPattern % hatPatterns.length][step];
+  if (hat > 0) {
+    playHat(hat, t);
+  }
+
+  // Synth stabs
+  if (stabPattern[step] && !bossMode) {
+    playSynthStab(t);
+  }
+
+  beatStep++;
+}
+
+function startBeat() {
+  stopBeat();
+  beatStep = 0;
+  beatTimer = setInterval(beatTick, STEP_TIME * 1000);
+}
+
+function stopBeat() {
+  if (beatTimer) { clearInterval(beatTimer); beatTimer = null; }
+}
+
+// ─── GAMEPLAY-REACTIVE AUDIO ──────────────────────────────
+
+function updateAudioForCombo(combo) {
+  if (!audioCtx || !masterFilter) return;
+  // Combo opens the master filter — more energy as combo builds
+  gameFilterCutoff = Math.min(12000, 3000 + combo * 600);
+  masterFilter.frequency.linearRampToValueAtTime(gameFilterCutoff, now() + 0.05);
+}
+
+function updateAudioForBoss(isBoss) {
+  bossMode = isBoss;
+  if (!audioCtx || !masterFilter) return;
+  if (isBoss) {
+    // Darker, half-time feel
+    masterFilter.frequency.linearRampToValueAtTime(2000, now() + 0.3);
+    gameFilterCutoff = 2000;
+  } else {
+    masterFilter.frequency.linearRampToValueAtTime(4000, now() + 0.3);
+    gameFilterCutoff = 4000;
+  }
+}
+
+function updateAudioForLevel(level) {
+  // Rotate patterns every few levels for variety
+  currentBassPattern = level % bassPatterns.length;
+  currentHatPattern = level % hatPatterns.length;
+}
+
+function sfxFilterSweepUp() {
+  // Call on level clear for that euphoric sweep
+  if (!audioCtx || !masterFilter) return;
+  const t = now();
+  masterFilter.frequency.setValueAtTime(800, t);
+  masterFilter.frequency.exponentialRampToValueAtTime(12000, t + 0.5);
+  setTimeout(() => {
+    masterFilter.frequency.linearRampToValueAtTime(gameFilterCutoff, now() + 0.3);
+  }, 600);
+}
+
+
+// ─── GAME ENGINE ───────────────────────────────────────────
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+const W = canvas.width;
+const H = canvas.height;
+const CX = W / 2;
+const CY = H / 2;
+const OUTER_RADIUS = 300;
+const INNER_RADIUS = 38;
+const PADDLE_RADIUS = OUTER_RADIUS - 12;
+
+// Screen shake
+let shakeX = 0, shakeY = 0, shakeIntensity = 0;
+
+// Freeze frame (hitstop)
+let freezeTimer = 0;
+function freeze(dur) { freezeTimer = dur; }
+
+// Tactile feedback on supporting devices (mobile) — silent no-op elsewhere
+function haptic(ms) { if (navigator.vibrate) { try { navigator.vibrate(ms); } catch(e) {} } }
+
+// Game state
+let paddleAngle = 0;
+const isTouchDevice = 'ontouchstart' in window;
+function getBasePaddleArc(lvl) {
+  let start = isTouchDevice ? 0.7 : 0.55;
+  let floor = isTouchDevice ? 0.4 : 0.25;
+  return Math.max(floor, start - (lvl - 1) * 0.03);
+}
+let paddleArc = getBasePaddleArc(1);
+let balls = [];
+let bricks = [];
+let powerups = [];
+let particles = [];
+let floatingTexts = [];
+let score = 0;
+let level = 1;
+let lives = 3;
+let combo = 0;
+let maxCombo = 0;
+let launched = false;
+let gameOverFlag = false;
+let lastTime = 0;
+let totalBricksDestroyed = 0;
+let levelsCleared = 0;
+let gameStarted = false;
+let gameStartTime = 0;
+// Safe localStorage wrapper (incognito/restricted environments)
+function safeGetItem(key) {
+  try { return localStorage.getItem(key); } catch(e) { return null; }
+}
+function safeSetItem(key, val) {
+  try { localStorage.setItem(key, val); } catch(e) {}
+}
+// Best-score storage — migrate once from the old working-title key
+const BEST_KEY = 'orbitalImpact_best';
+let bestScore = parseInt(safeGetItem(BEST_KEY)) || 0;
+if (!bestScore) {
+  const legacyBest = parseInt(safeGetItem('orbitBreaker2_best')) || 0;
+  if (legacyBest > 0) { bestScore = legacyBest; safeSetItem(BEST_KEY, bestScore); }
+}
+
+// Local top-5 score history (date-stamped, no initials — mobile-friendly)
+const SCORES_KEY = 'orbitalImpact_scores';
+function todayStamp() {
+  try { return new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); }
+  catch (e) { return ''; }
+}
+function loadScores() {
+  try { const s = JSON.parse(safeGetItem(SCORES_KEY)); return Array.isArray(s) ? s : []; }
+  catch (e) { return []; }
+}
+function saveScore(sc) {
+  let list = loadScores();
+  const entry = { score: sc, date: todayStamp() };
+  list.push(entry);
+  list.sort((a, b) => b.score - a.score);
+  const rank = list.indexOf(entry);
+  list = list.slice(0, 5);
+  safeSetItem(SCORES_KEY, JSON.stringify(list));
+  return { list, rank: rank < 5 ? rank : -1 };
+}
+let scoreHistory = loadScores();
+// Seed the list from a pre-existing single best so returning players keep it
+if (scoreHistory.length === 0 && bestScore > 0) {
+  scoreHistory = [{ score: bestScore, date: '—' }];
+  safeSetItem(SCORES_KEY, JSON.stringify(scoreHistory));
+}
+
+// Progressive power-up unlock order (simplest → most complex)
+// Level 1: no power-ups, Level 2: bigpaddle, Level 3: slow, Level 4: multiball, etc.
+const POWERUP_UNLOCK_ORDER = ['bigpaddle', 'slow', 'multiball', 'fireball', 'laser', 'shield'];
+
+function getUnlockedPowerups(lvl) {
+  if (lvl <= 1) return [];
+  let count = Math.min(lvl - 1, POWERUP_UNLOCK_ORDER.length);
+  return POWERUP_UNLOCK_ORDER.slice(0, count);
+}
+
+// Timers
+let bigPaddleTimer = 0;
+let fireballTimer = 0;
+let slowTimer = 0;
+let shieldHits = 0; // charges the shield can still absorb (replaces the old time-based shield)
+let laserTimer = 0;
+let laserCooldown = 0;
+
+// Slow-mo for last brick
+let slowMoTimer = 0;
+let slowMoScale = 1;
+
+// Level transition
+let levelTransition = 0; // 0 = none, counts down
+let levelTransitionRipple = 0;
+
+// Boss
+let boss = null;
+let bossJustCleared = false; // set on boss death so the level-complete check owns the fanfare/announcement once
+
+// First-run steering coach — auto-sweeps the paddle once so new players learn it orbits
+let coachActive = false, coachTime = 0, coachSeen = false;
+
+// Core pulse
+let corePulse = 0;
+let coreHue = 190;
+
+// Star field (static)
+const stars = [];
+for (let i = 0; i < 80; i++) {
+  stars.push({
+    x: Math.random() * W,
+    y: Math.random() * H,
+    size: 0.3 + Math.random() * 1.2,
+    brightness: 0.02 + Math.random() * 0.06,
+    twinkleSpeed: 1 + Math.random() * 3
+  });
+}
+
+const BRICK_COLORS = ['#00ffff', '#ff2d95', '#ffe600', '#ff6600'];
+
+// ─── LEVEL PATTERNS ─────────────────────────────────────
+function generateLevel() {
+  bricks = [];
+  powerups = [];
+  boss = null;
+  // Shrink paddle over levels (unless big paddle powerup is active)
+  if (bigPaddleTimer <= 0) paddleArc = getBasePaddleArc(level);
+
+  // Boss level every 3rd
+  if (level % 3 === 0 && level > 0) {
+    updateAudioForBoss(true);
+    generateBossLevel();
+    return;
+  }
+  updateAudioForBoss(false);
+  updateAudioForLevel(level);
+
+  const patternType = level % 5;
+
+  // Gentler difficulty ramp — max 5 rings, wider gaps
+  // Level 1: 2, Level 2: 3, Level 4: 4, Level 7+: 5
+  let numRings;
+  if (level === 1) numRings = 2;
+  else if (level <= 2) numRings = 3;
+  else if (level <= 4) numRings = 4;
+  else numRings = Math.min(4 + Math.floor((level - 4) * 0.3), 5);
+
+  let ringSpacing = (PADDLE_RADIUS - INNER_RADIUS - 60) / numRings;
+
+  for (let ring = 0; ring < numRings; ring++) {
+    let radius = INNER_RADIUS + 48 + ring * ringSpacing;
+    // Wider bricks with bigger gaps — keeps things readable
+    let brickArc = level <= 2 ? 0.18 : 0.14;
+    let gap = level <= 2 ? 0.06 : 0.04;
+    let numBricks = Math.floor(2 * Math.PI / (brickArc + gap));
+    brickArc = (2 * Math.PI / numBricks) - gap;
+
+    for (let i = 0; i < numBricks; i++) {
+      let angle = (i / numBricks) * 2 * Math.PI;
+      let skip = false;
+
+      // Level 1: skip more bricks for a sparser, gentler intro
+      if (level === 1) {
+        skip = Math.random() < 0.3;
+      } else if (level === 2) {
+        skip = Math.random() < 0.15;
+      } else {
+        // Pattern-based skipping — designed for visual clarity
+        switch (patternType) {
+          case 0: // Full rings with breathing room
+            skip = Math.random() < 0.2;
+            break;
+          case 1: // Spiral arms (clear open channels)
+            skip = ((i + ring * 3) % 4 === 0);
+            break;
+          case 2: // Checkerboard
+            skip = (i + ring) % 2 === 0;
+            break;
+          case 3: // Fortress walls (alternating thick/thin rings)
+            skip = ring % 2 === 0 ? (i % 2 === 0) : (i % 4 === 0);
+            break;
+          case 4: // Quadrant gaps (4 clear paths)
+            {
+              let normAngle = ((i / numBricks) * Math.PI * 2) % (Math.PI / 2);
+              skip = normAngle < 0.25 || (ring % 2 === 1 && i % 3 === 0);
+            }
+            break;
+        }
+      }
+
+      if (skip) continue;
+
+      // HP scaling: level 1 all 1HP, level 2-3 occasional 2HP, later levels ramp up
+      let hp = 1;
+      if (level >= 3 && ring >= numRings - 2 && Math.random() < 0.15 + (level - 3) * 0.05) hp = 2;
+      if (level > 5 && Math.random() < 0.10) hp = 3;
+      if (level > 8 && ring === 0 && Math.random() < 0.12) hp = 4;
+
+      // Temperature gradient: outer=cyan(cool) → inner=orange(hot, near core)
+      // ring 0 = innermost, high ring = outermost; BRICK_COLORS[0]=cyan, [3]=orange
+      let ringPct = numRings <= 1 ? 0 : ring / (numRings - 1); // 0=inner, 1=outer
+      let colorIdx = Math.min(3, Math.floor((1 - ringPct) * BRICK_COLORS.length));
+
+      // Level 1: no power-up drops (player learns pure mechanics first)
+      let powerupChance = level === 1 ? 0 : 0.10;
+
+      bricks.push({
+        radius,
+        angle,
+        arc: brickArc,
+        thickness: ringSpacing * 0.6,
+        hp,
+        maxHp: hp,
+        color: BRICK_COLORS[colorIdx],
+        hasPowerup: Math.random() < powerupChance,
+        hitFlash: 0
+      });
+    }
+  }
+
+  // Hard cap: if too many bricks, randomly thin until under limit
+  const MAX_BRICKS = 100 + level * 5; // 105 at level 1, 120 at level 4, etc.
+  while (bricks.length > MAX_BRICKS) {
+    let idx = Math.floor(Math.random() * bricks.length);
+    bricks.splice(idx, 1);
+  }
+
+  // Show unlock notification for newly available power-up
+  if (level > 1 && level <= POWERUP_UNLOCK_ORDER.length + 1) {
+    let newPowerup = POWERUP_UNLOCK_ORDER[level - 2];
+    if (newPowerup) {
+      const puNames = {
+        bigpaddle: 'BIG PADDLE', slow: 'SLOW-MO', multiball: 'MULTI-BALL',
+        fireball: 'FIREBALL', laser: 'LASER', shield: 'SHIELD'
+      };
+      const puColors = {
+        bigpaddle: '#00ffff', slow: '#b44dff', multiball: '#00ffff',
+        fireball: '#ffe600', laser: '#ff6600', shield: '#b44dff'
+      };
+      addFloatingText(CX, CY + 50, `${puNames[newPowerup]} UNLOCKED!`, puColors[newPowerup], 16);
+    }
+  }
+}
+
+function generateBossLevel() {
+  // Boss has shield segments around the core + some regular bricks
+  boss = {
+    hp: 8 + level * 3,
+    maxHp: 8 + level * 3,
+    rotation: 0,
+    rotSpeed: 0.5 + level * 0.1,
+    shields: [],
+    hitFlash: 0,
+    phase: 0
+  };
+
+  // Shield segments — color coded by boss tier
+  let numShields = 4 + Math.floor(level / 3);
+  let shieldArc = (2 * Math.PI / numShields) * 0.7;
+  let shieldColor = '#ff6600';
+  for (let i = 0; i < numShields; i++) {
+    boss.shields.push({
+      angle: (i / numShields) * 2 * Math.PI,
+      arc: shieldArc,
+      radius: INNER_RADIUS + 30,
+      thickness: 18,
+      hp: 2 + Math.floor(level / 4),
+      maxHp: 2 + Math.floor(level / 4),
+      color: shieldColor
+    });
+  }
+
+  // Boss brick patterns — symmetric and intentional
+  const bossPattern = Math.floor(level / 3) % 3; // cycles through 3 patterns
+  const BOSS_COLORS = ['#00ffff', '#ff2d95', '#ffe600', '#ff6600'];
+  let numRings = 2;
+  let ringSpacing = 50;
+
+  for (let ring = 0; ring < numRings; ring++) {
+    let radius = INNER_RADIUS + 85 + ring * ringSpacing;
+    let brickArc = 0.16;
+    let gap = 0.06;
+    let numBricks = Math.floor(2 * Math.PI / (brickArc + gap));
+    brickArc = (2 * Math.PI / numBricks) - gap;
+    let ringColor = BOSS_COLORS[(ring + Math.floor(level / 3)) % BOSS_COLORS.length];
+
+    for (let i = 0; i < numBricks; i++) {
+      let angle = (i / numBricks) * 2 * Math.PI;
+      let skip = false;
+
+      switch (bossPattern) {
+        case 0: // Cross pattern — 4 open channels
+          {
+            let sector = ((angle + Math.PI) % (Math.PI * 2)) / (Math.PI / 2);
+            let sectorPos = sector % 1;
+            skip = sectorPos < 0.12 || sectorPos > 0.88;
+          }
+          break;
+        case 1: // Alternating arcs — inner and outer offset
+          skip = ring === 0 ? (i % 3 === 0) : (i % 3 === 1);
+          break;
+        case 2: // Sparse symmetry — 6-fold rotational
+          {
+            let sextant = Math.floor((i / numBricks) * 6);
+            skip = (i + sextant) % 3 === 0;
+          }
+          break;
+      }
+
+      if (skip) continue;
+
+      bricks.push({
+        radius, angle,
+        arc: brickArc,
+        thickness: ringSpacing * 0.5,
+        hp: 1,
+        maxHp: 1,
+        color: ringColor,
+        hasPowerup: Math.random() < 0.15,
+        hitFlash: 0
+      });
+    }
+  }
+}
+
+function resetBall() {
+  launched = false;
+  balls = [{
+    x: CX + Math.cos(paddleAngle) * (PADDLE_RADIUS - 20),
+    y: CY + Math.sin(paddleAngle) * (PADDLE_RADIUS - 20),
+    vx: 0, vy: 0,
+    speed: 280 + level * 12,
+    radius: 5,
+    fire: false,
+    trail: []
+  }];
+}
+
+function launchBall() {
+  if (launched) return;
+  launched = true;
+  coachActive = false;
+  gameStartTime = performance.now() / 1000;
+  sfxLaunch();
+  let ball = balls[0];
+  let angle = paddleAngle + Math.PI + (Math.random() - 0.5) * 0.3;
+  ball.vx = Math.cos(angle) * ball.speed;
+  ball.vy = Math.sin(angle) * ball.speed;
+}
+
+// ─── FLOATING TEXT ──────────────────────────────────────
+function addFloatingText(x, y, text, color, size = 12) {
+  // Cap floating text count to reduce visual noise
+  if (floatingTexts.length > 6) floatingTexts.shift();
+  floatingTexts.push({ x, y, text, color, life: 0.6, size: Math.min(size, 16), vy: -80 });
+}
+
+// ─── PARTICLES ──────────────────────────────────────────
+const MAX_PARTICLES = 80; // Hard cap on particle count
+function burstParticles(x, y, color, count, speed = 150, size = 4, life = 0.6) {
+  // Reduce burst if near particle cap
+  if (particles.length > MAX_PARTICLES * 0.7) count = Math.max(2, Math.floor(count * 0.4));
+  for (let i = 0; i < count; i++) {
+    let angle = Math.random() * Math.PI * 2;
+    let spd = speed * (0.3 + Math.random() * 0.7);
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * spd,
+      vy: Math.sin(angle) * spd,
+      life, color,
+      size: size * (0.5 + Math.random() * 0.5)
+    });
+  }
+}
+
+function sparkleRing(radius, color, count) {
+  for (let i = 0; i < count; i++) {
+    let a = Math.random() * Math.PI * 2;
+    let r = radius + (Math.random() - 0.5) * 20;
+    particles.push({
+      x: CX + Math.cos(a) * r,
+      y: CY + Math.sin(a) * r,
+      vx: Math.cos(a) * 40,
+      vy: Math.sin(a) * 40,
+      life: 0.5 + Math.random() * 0.3,
+      color,
+      size: 2 + Math.random() * 2
+    });
+  }
+}
+
+// ─── SCREEN SHAKE ───────────────────────────────────────
+function shake(intensity) {
+  shakeIntensity = Math.max(shakeIntensity, intensity);
+}
+
+// ─── POWER-UPS ──────────────────────────────────────────
+function spawnPowerup(x, y) {
+  const unlocked = getUnlockedPowerups(level);
+  if (unlocked.length === 0) return; // No power-ups available yet
+
+  const allTypes = ['multiball', 'bigpaddle', 'fireball', 'slow', 'laser', 'shield'];
+  const allWeights = [3, 3, 2, 2, 2, 1];
+
+  // Filter to only unlocked types
+  let types = [];
+  let weights = [];
+  for (let i = 0; i < allTypes.length; i++) {
+    if (unlocked.includes(allTypes[i])) {
+      types.push(allTypes[i]);
+      weights.push(allWeights[i]);
+    }
+  }
+  if (types.length === 0) return;
+
+  const totalWeight = weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * totalWeight;
+  let type = types[0];
+  for (let i = 0; i < weights.length; i++) {
+    r -= weights[i];
+    if (r <= 0) { type = types[i]; break; }
+  }
+
+  const colors = {
+    multiball: '#00ffff', bigpaddle: '#00ffff', fireball: '#ffe600',
+    slow: '#b44dff', laser: '#ff6600', shield: '#b44dff'
+  };
+  const labels = {
+    multiball: '×3', bigpaddle: '▬', fireball: '🔥',
+    slow: '◎', laser: '↯', shield: '◇'
+  };
+
+  powerups.push({ x, y, type, color: colors[type], label: labels[type], radius: 7, pulse: 0 });
+}
+
+function activatePowerup(type) {
+  sfxPowerup();
+  switch (type) {
+    case 'multiball': {
+      const MAX_BALLS = 6;
+      let newBalls = [];
+      // Only split the first ball (not all balls) to prevent exponential growth
+      let sourceBall = balls[0];
+      if (balls.length < MAX_BALLS) {
+        for (let i = 0; i < 2; i++) {
+          let a = Math.atan2(sourceBall.vy, sourceBall.vx) + (i === 0 ? 0.6 : -0.6);
+          newBalls.push({
+            x: sourceBall.x, y: sourceBall.y,
+            vx: Math.cos(a) * sourceBall.speed,
+            vy: Math.sin(a) * sourceBall.speed,
+            speed: sourceBall.speed, radius: sourceBall.radius,
+            fire: sourceBall.fire, trail: []
+          });
+        }
+        // Cap total ball count
+        while (balls.length + newBalls.length > MAX_BALLS) newBalls.pop();
+        balls.push(...newBalls);
+      }
+      score += 25;
+      addFloatingText(CX, CY - 30, 'MULTI-BALL!', '#00ffff', 18);
+      break;
+    }
+    case 'bigpaddle':
+      // Relative growth so it always enlarges the paddle regardless of level/platform base arc
+      paddleArc = Math.min(1.0, getBasePaddleArc(level) * 1.4);
+      bigPaddleTimer = 12;
+      score += 15;
+      addFloatingText(CX, CY - 30, 'BIG PADDLE!', '#00ffff', 18);
+      break;
+    case 'fireball':
+      fireballTimer = 10;
+      for (let ball of balls) ball.fire = true;
+      score += 20;
+      addFloatingText(CX, CY - 30, 'FIREBALL!', '#ffe600', 18);
+      break;
+    case 'slow':
+      slowTimer = 10;
+      score += 15;
+      addFloatingText(CX, CY - 30, 'SLOW-MO!', '#b44dff', 18);
+      break;
+    case 'laser':
+      laserTimer = 8;
+      score += 20;
+      addFloatingText(CX, CY - 30, 'LASER!', '#ff6600', 18);
+      break;
+    case 'shield':
+      shieldHits = 3;
+      score += 15;
+      addFloatingText(CX, CY - 30, 'SHIELD ×3', '#b44dff', 18);
+      break;
+  }
+}
+
+// ─── LASER SHOTS ────────────────────────────────────────
+let lasers = [];
+function fireLaser() {
+  if (laserCooldown > 0) return;
+  laserCooldown = 0.15;
+  sfxLaser();
+  let angle = paddleAngle + Math.PI; // fire inward
+  let startR = PADDLE_RADIUS - 15;
+  lasers.push({
+    x: CX + Math.cos(paddleAngle) * startR,
+    y: CY + Math.sin(paddleAngle) * startR,
+    vx: Math.cos(angle) * 700,
+    vy: Math.sin(angle) * 700,
+    life: 0.5
+  });
+}
+
+// ─── UPDATE ─────────────────────────────────────────────
+function update(dt) {
+  // Freeze frame (hitstop)
+  if (freezeTimer > 0) { freezeTimer -= dt; return; }
+
+  // Level transition
+  if (levelTransition > 0) {
+    levelTransition -= dt;
+    levelTransitionRipple += dt * 400;
+    if (levelTransition <= 0) {
+      levelTransition = 0;
+      levelTransitionRipple = 0;
+    }
+    return;
+  }
+
+  // Slow-mo effect
+  if (slowMoTimer > 0) {
+    slowMoTimer -= dt;
+    slowMoScale = 0.2 + 0.8 * (1 - Math.max(0, slowMoTimer) / 0.8);
+  } else {
+    slowMoScale = 1;
+  }
+
+  let effectiveDt = dt * slowMoScale;
+
+  // Core pulse
+  corePulse += effectiveDt * 3;
+  coreHue = 190 + Math.sin(corePulse * 0.5) * 15;
+
+  // Screen shake decay
+  if (shakeIntensity > 0) {
+    shakeX = (Math.random() - 0.5) * shakeIntensity;
+    shakeY = (Math.random() - 0.5) * shakeIntensity;
+    shakeIntensity *= 0.85;
+    if (shakeIntensity < 0.5) { shakeIntensity = 0; shakeX = 0; shakeY = 0; }
+  }
+
+  if (!launched) {
+    // First-run coach: auto-sweep the paddle so the player sees it orbits, until they take control
+    if (coachActive) {
+      coachTime += dt;
+      if (coachTime > 4.5) coachActive = false; // auto-hand-over if they never touch anything
+      else paddleAngle = -Math.PI / 2 + Math.sin(coachTime * 1.3) * 1.0;
+    }
+    balls[0].x = CX + Math.cos(paddleAngle) * (PADDLE_RADIUS - 20);
+    balls[0].y = CY + Math.sin(paddleAngle) * (PADDLE_RADIUS - 20);
+
+    // Fire laser while waiting
+    if (laserTimer > 0) {
+      laserTimer -= dt;
+      fireLaser();
+    }
+    return;
+  }
+
+  // Timers
+  if (bigPaddleTimer > 0) { bigPaddleTimer -= effectiveDt; if (bigPaddleTimer <= 0) paddleArc = getBasePaddleArc(level); }
+  if (fireballTimer > 0) { fireballTimer -= effectiveDt; if (fireballTimer <= 0) { for (let b of balls) b.fire = false; } }
+  if (slowTimer > 0) slowTimer -= effectiveDt;
+  if (laserTimer > 0) {
+    laserTimer -= effectiveDt;
+    laserCooldown -= effectiveDt;
+    fireLaser();
+  } else {
+    laserCooldown -= effectiveDt;
+  }
+
+  let speedMult = slowTimer > 0 ? 0.55 : 1;
+
+  // Boss rotation
+  if (boss) {
+    boss.rotation += boss.rotSpeed * effectiveDt;
+    if (boss.hitFlash > 0) boss.hitFlash -= effectiveDt;
+
+    // Phase changes
+    if (boss.hp < boss.maxHp * 0.5 && boss.phase === 0) {
+      boss.phase = 1;
+      boss.rotSpeed *= 1.5;
+    }
+  }
+
+  // Update balls
+  let ballsToRemove = [];
+  for (let i = 0; i < balls.length; i++) {
+    let ball = balls[i];
+
+    // Trail
+    ball.trail.push({ x: ball.x, y: ball.y });
+    if (ball.trail.length > 8) ball.trail.shift();
+
+    ball.x += ball.vx * effectiveDt * speedMult;
+    ball.y += ball.vy * effectiveDt * speedMult;
+
+    let dx = ball.x - CX;
+    let dy = ball.y - CY;
+    let dist = Math.sqrt(dx * dx + dy * dy);
+    let ballAngle = Math.atan2(dy, dx);
+
+    // Boss core collision
+    if (boss && dist < INNER_RADIUS + 20 + ball.radius) {
+      // Check if hitting a shield
+      let hitShield = false;
+      for (let s = boss.shields.length - 1; s >= 0; s--) {
+        let shield = boss.shields[s];
+        let sAngle = normalizeAngle(ballAngle - shield.angle - boss.rotation);
+        if (Math.abs(sAngle) < shield.arc / 2) {
+          // Hit shield
+          shield.hp--;
+          hitShield = true;
+          sfxHit(combo);
+          shake(4);
+          combo++;
+          updateAudioForCombo(combo);
+          score += 15;
+          burstParticles(ball.x, ball.y, '#ff6600', 5, 100, 3);
+
+          if (shield.hp <= 0) {
+            boss.shields.splice(s, 1);
+            sfxBreak(combo);
+            shake(8);
+            burstParticles(ball.x, ball.y, '#ff6600', 15, 200, 5);
+            score += 50;
+            addFloatingText(ball.x, ball.y, '+50', '#ff6600', 16);
+            if (boss.shields.length === 0) {
+              addFloatingText(CX, CY - 60, 'HIT THE CORE!', '#ff2d95', 24);
+            }
+          }
+
+          // Reflect
+          let nx = dx / dist;
+          let ny = dy / dist;
+          let dot = ball.vx * nx + ball.vy * ny;
+          ball.vx -= 2 * dot * nx;
+          ball.vy -= 2 * dot * ny;
+          break;
+        }
+      }
+
+      // Hit boss core directly (no shield in way)
+      if (!hitShield && dist < INNER_RADIUS + 8 + ball.radius) {
+        boss.hp--;
+        boss.hitFlash = 0.15;
+        sfxBossHit();
+        haptic(20);
+        shake(12);
+        freeze(0.08);
+        combo++;
+        updateAudioForCombo(combo);
+        score += 30;
+        corePulse += 2;
+        addFloatingText(ball.x, ball.y, `+30`, '#ff2d95', 20);
+        burstParticles(CX, CY, '#ff2d95', 10, 120, 4);
+        burstParticles(CX, CY, '#ffe600', 5, 80, 3);
+
+        // Reflect
+        let nx = dx / dist;
+        let ny = dy / dist;
+        let dot = ball.vx * nx + ball.vy * ny;
+        ball.vx -= 2 * dot * nx;
+        ball.vy -= 2 * dot * ny;
+        ball.x = CX + nx * (INNER_RADIUS + 10 + ball.radius);
+        ball.y = CY + ny * (INNER_RADIUS + 10 + ball.radius);
+
+        if (boss.hp <= 0) {
+          // Boss defeated! Level-clear fanfare is played once by the level-complete check below.
+          bossJustCleared = true;
+          updateAudioForBoss(false);
+          shake(20);
+          freeze(0.12);
+          burstParticles(CX, CY, '#ff2d95', 40, 300, 6, 1.2);
+          burstParticles(CX, CY, '#ffe600', 30, 250, 5, 1.0);
+          burstParticles(CX, CY, '#00ffff', 20, 200, 4, 0.8);
+          addFloatingText(CX, CY, 'CORE SHATTERED!', '#ffe600', 28);
+          score += 500;
+          boss = null;
+          // Clear remaining bricks
+          for (let b of bricks) {
+            burstParticles(
+              CX + Math.cos(b.angle) * b.radius,
+              CY + Math.sin(b.angle) * b.radius,
+              b.color, 4, 100, 3
+            );
+          }
+          bricks = [];
+        }
+      }
+    }
+
+    // Bounce off center core (non-boss)
+    if (!boss && dist < INNER_RADIUS + ball.radius) {
+      let nx = dx / dist;
+      let ny = dy / dist;
+      let dot = ball.vx * nx + ball.vy * ny;
+      ball.vx -= 2 * dot * nx;
+      ball.vy -= 2 * dot * ny;
+      ball.x = CX + nx * (INNER_RADIUS + ball.radius + 1);
+      ball.y = CY + ny * (INNER_RADIUS + ball.radius + 1);
+      ball.vx += (Math.random() - 0.5) * 15;
+      ball.vy += (Math.random() - 0.5) * 15;
+      let spd = Math.sqrt(ball.vx ** 2 + ball.vy ** 2);
+      ball.vx = (ball.vx / spd) * ball.speed;
+      ball.vy = (ball.vy / spd) * ball.speed;
+      sfxBounce();
+      corePulse += 0.5;
+      burstParticles(ball.x, ball.y, `hsl(${coreHue}, 100%, 60%)`, 3, 60, 2, 0.3);
+    }
+
+    // Paddle / outer wall
+    if (dist > PADDLE_RADIUS - ball.radius) {
+      let angleDiff = normalizeAngle(ballAngle - paddleAngle);
+      let halfArc = paddleArc / 2;
+      let collisionHalfArc = halfArc + 0.06; // forgiveness zone
+
+      if (angleDiff > -collisionHalfArc && angleDiff < collisionHalfArc) {
+        // Hit paddle (or forgiveness zone)
+        let nearMiss = Math.abs(angleDiff) > halfArc;
+        let nx = -dx / dist;
+        let ny = -dy / dist;
+        let offset = Math.max(-1, Math.min(1, angleDiff / halfArc));
+        let reflectAngle = Math.atan2(ny, nx) + offset * 0.5;
+        ball.vx = Math.cos(reflectAngle) * ball.speed;
+        ball.vy = Math.sin(reflectAngle) * ball.speed;
+        ball.x = CX + (dx / dist) * (PADDLE_RADIUS - ball.radius - 1);
+        ball.y = CY + (dy / dist) * (PADDLE_RADIUS - ball.radius - 1);
+        let speedFactor = Math.min(1.6, ball.speed / 300);
+        sfxBounce(speedFactor);
+        shake(1 + speedFactor * 1.5);
+        // Decay combo instead of hard reset so good runs build across volleys
+        let prevCombo = combo;
+        combo = Math.floor(combo * 0.67);
+        updateAudioForCombo(combo);
+        if (prevCombo >= 5 && combo < prevCombo) {
+          // Combo faded — give the loss a beat instead of silence
+          sfxComboBreak(prevCombo);
+          addFloatingText(ball.x, ball.y, `${combo}x`, '#b44dff', 14);
+          burstParticles(ball.x, ball.y, '#b44dff', 4, 70, 2, 0.4);
+        }
+        if (nearMiss) {
+          // Close call — extra sparkle
+          burstParticles(ball.x, ball.y, '#ffe600', 8, 100, 3, 0.5);
+          burstParticles(ball.x, ball.y, '#ffffff', 5, 70, 2, 0.3);
+        } else {
+          burstParticles(ball.x, ball.y, '#00ffff', 3 + Math.round(speedFactor * 3), 50 + speedFactor * 40, 2, 0.25);
+        }
+      } else if (dist > OUTER_RADIUS) {
+        // Shield check — absorbs a fixed number of hits instead of running on a timer
+        if (shieldHits > 0) {
+          // Shield bounces ball back and spends one charge
+          let nx = -dx / dist;
+          let ny = -dy / dist;
+          ball.vx = nx * ball.speed;
+          ball.vy = ny * ball.speed;
+          ball.x = CX + (dx / dist) * (OUTER_RADIUS - 2);
+          ball.y = CY + (dy / dist) * (OUTER_RADIUS - 2);
+          sfxBounce(1.3);
+          sparkleRing(OUTER_RADIUS, '#b44dff', 8);
+          shieldHits--;
+          haptic(15);
+          if (shieldHits > 0) {
+            addFloatingText(ball.x, ball.y, `SHIELD ×${shieldHits}`, '#b44dff', 13);
+          } else {
+            addFloatingText(CX, CY - 60, 'SHIELD DOWN', '#b44dff', 18);
+          }
+        } else {
+          // Ball lost
+          ballsToRemove.push(i);
+          sfxDeath();
+          haptic(40);
+          shake(10);
+          burstParticles(ball.x, ball.y, '#ff6600', 15, 120, 4, 0.7);
+        }
+      }
+    }
+
+    // Brick collisions
+    for (let j = bricks.length - 1; j >= 0; j--) {
+      let brick = bricks[j];
+      let brickInner = brick.radius - brick.thickness / 2;
+      let brickOuter = brick.radius + brick.thickness / 2;
+      if (dist < brickInner - ball.radius || dist > brickOuter + ball.radius) continue;
+
+      let bAngleDiff = normalizeAngle(ballAngle - brick.angle);
+      let halfArc = brick.arc / 2 + ball.radius / brick.radius;
+      if (bAngleDiff > -halfArc && bAngleDiff < halfArc) {
+        brick.hp--;
+        brick.hitFlash = 0.12;
+        combo++;
+        maxCombo = Math.max(maxCombo, combo);
+        updateAudioForCombo(combo);
+        let pts = Math.floor(10 * (1 + combo * 0.15));
+        score += pts;
+
+        let bx = CX + Math.cos(brick.angle) * brick.radius;
+        let by = CY + Math.sin(brick.angle) * brick.radius;
+
+        if (brick.hp <= 0) {
+          // Destroyed
+          totalBricksDestroyed++;
+          sfxBreak(combo);
+          shake(5 + Math.min(combo, 10));
+          freeze(0.05);
+          haptic(12);
+          burstParticles(bx, by, brick.color, 10 + Math.min(combo * 2, 15), 180, 5, 0.7);
+          addFloatingText(bx, by, `+${pts}`, brick.color, 12 + Math.min(combo, 8));
+
+          if (brick.hasPowerup) spawnPowerup(bx, by);
+          bricks.splice(j, 1);
+
+          // Slow-mo on last brick
+          if (bricks.length === 0 && !boss) {
+            slowMoTimer = 0.8;
+          }
+          // Last 3 bricks — dramatic
+          if (bricks.length <= 3 && bricks.length > 0 && !boss) {
+            slowMoTimer = 0.3;
+          }
+          // All bricks gone but boss still alive — prompt player
+          if (bricks.length === 0 && boss) {
+            addFloatingText(CX, CY - 60, 'HIT THE CORE!', '#ff2d95', 24);
+          }
+        } else {
+          sfxHit(combo);
+          shake(3);
+          brick.color = lightenColor(brick.color, 0.2);
+          burstParticles(bx, by, brick.color, 4, 80, 3, 0.4);
+        }
+
+        // Reflect
+        if (!ball.fire) {
+          let nx = dx / dist;
+          let ny = dy / dist;
+          let dot = ball.vx * nx + ball.vy * ny;
+          ball.vx -= 2 * dot * nx;
+          ball.vy -= 2 * dot * ny;
+        }
+        break;
+      }
+    }
+  }
+
+  // Remove dead balls
+  for (let i = ballsToRemove.length - 1; i >= 0; i--) {
+    balls.splice(ballsToRemove[i], 1);
+  }
+
+  // All balls lost
+  if (balls.length === 0) {
+    lives--;
+    if (lives <= 0) {
+      gameOverFlag = true;
+      stopBeat();
+      showGameOver();
+      return;
+    }
+    resetBall();
+  }
+
+  // Update lasers
+  for (let i = lasers.length - 1; i >= 0; i--) {
+    let l = lasers[i];
+    l.x += l.vx * effectiveDt;
+    l.y += l.vy * effectiveDt;
+    l.life -= effectiveDt;
+    if (l.life <= 0) { lasers.splice(i, 1); continue; }
+
+    let dx = l.x - CX;
+    let dy = l.y - CY;
+    let dist = Math.sqrt(dx * dx + dy * dy);
+
+    // Laser hits bricks
+    for (let j = bricks.length - 1; j >= 0; j--) {
+      let brick = bricks[j];
+      let brickInner = brick.radius - brick.thickness / 2;
+      let brickOuter = brick.radius + brick.thickness / 2;
+      if (dist < brickInner || dist > brickOuter) continue;
+      let bAngle = Math.atan2(dy, dx);
+      let bAngleDiff = normalizeAngle(bAngle - brick.angle);
+      if (Math.abs(bAngleDiff) < brick.arc / 2) {
+        brick.hp--;
+        brick.hitFlash = 0.1;
+        let bx = CX + Math.cos(brick.angle) * brick.radius;
+        let by = CY + Math.sin(brick.angle) * brick.radius;
+        burstParticles(l.x, l.y, '#ff6600', 3, 60, 2, 0.3);
+        if (brick.hp <= 0) {
+          totalBricksDestroyed++;
+          sfxBreak(0);
+          burstParticles(bx, by, brick.color, 8, 150, 4, 0.6);
+          if (brick.hasPowerup) spawnPowerup(bx, by);
+          bricks.splice(j, 1);
+          score += 10;
+          if (bricks.length === 0 && boss) {
+            addFloatingText(CX, CY - 60, 'HIT THE CORE!', '#ff2d95', 24);
+          }
+        }
+        lasers.splice(i, 1);
+        break;
+      }
+    }
+
+    // Laser hits boss shields
+    if (boss && dist < INNER_RADIUS + 50) {
+      for (let s = boss.shields.length - 1; s >= 0; s--) {
+        let shield = boss.shields[s];
+        let lAngle = Math.atan2(dy, dx);
+        let sAngle = normalizeAngle(lAngle - shield.angle - boss.rotation);
+        if (Math.abs(sAngle) < shield.arc / 2 && dist < shield.radius + shield.thickness / 2 + 5) {
+          shield.hp--;
+          burstParticles(l.x, l.y, '#ff6600', 4, 80, 3);
+          if (shield.hp <= 0) {
+            boss.shields.splice(s, 1);
+            sfxBreak(0);
+            score += 50;
+            if (boss.shields.length === 0) {
+              addFloatingText(CX, CY - 60, 'HIT THE CORE!', '#ff2d95', 24);
+            }
+          }
+          lasers.splice(i, 1);
+          break;
+        }
+      }
+    }
+
+    // Laser hits boss core
+    if (boss && dist < INNER_RADIUS + 8) {
+      boss.hp--;
+      boss.hitFlash = 0.1;
+      sfxBossHit();
+      shake(6);
+      burstParticles(l.x, l.y, '#ff6600', 6, 100, 3);
+      score += 30;
+      lasers.splice(i, 1);
+      if (boss.hp <= 0) {
+        // Level-clear fanfare is played once by the level-complete check below.
+        bossJustCleared = true;
+        updateAudioForBoss(false);
+        shake(20);
+        burstParticles(CX, CY, '#ff2d95', 40, 300, 6, 1.2);
+        addFloatingText(CX, CY, 'CORE SHATTERED!', '#ffe600', 28);
+        score += 500;
+        boss = null;
+        for (let b of bricks) {
+          burstParticles(CX + Math.cos(b.angle) * b.radius, CY + Math.sin(b.angle) * b.radius, b.color, 4, 100, 3);
+        }
+        bricks = [];
+      }
+    }
+  }
+
+  // Update power-ups
+  for (let i = powerups.length - 1; i >= 0; i--) {
+    let pu = powerups[i];
+    pu.pulse += effectiveDt * 5;
+    let dx = pu.x - CX;
+    let dy = pu.y - CY;
+    let dist = Math.sqrt(dx * dx + dy * dy);
+    let nx = dx / dist;
+    let ny = dy / dist;
+    pu.x += nx * 90 * effectiveDt;
+    pu.y += ny * 90 * effectiveDt;
+
+    let puDist = Math.sqrt((pu.x - CX) ** 2 + (pu.y - CY) ** 2);
+    let puAngle = Math.atan2(pu.y - CY, pu.x - CX);
+    let angleDiff = normalizeAngle(puAngle - paddleAngle);
+    if (puDist > PADDLE_RADIUS - 18 && Math.abs(angleDiff) < paddleArc / 2 + 0.12) {
+      activatePowerup(pu.type);
+      powerups.splice(i, 1);
+      continue;
+    }
+    if (puDist > OUTER_RADIUS + 20) {
+      powerups.splice(i, 1);
+    }
+  }
+
+  // Update particles (with hard cap)
+  for (let i = particles.length - 1; i >= 0; i--) {
+    let p = particles[i];
+    p.x += p.vx * effectiveDt;
+    p.y += p.vy * effectiveDt;
+    p.vx *= 0.98;
+    p.vy *= 0.98;
+    p.life -= effectiveDt;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+  // Hard cap: remove oldest particles if over limit
+  while (particles.length > MAX_PARTICLES) particles.shift();
+
+  // Update floating texts
+  for (let i = floatingTexts.length - 1; i >= 0; i--) {
+    let ft = floatingTexts[i];
+    ft.y += ft.vy * effectiveDt;
+    ft.life -= effectiveDt;
+    if (ft.life <= 0) floatingTexts.splice(i, 1);
+  }
+
+  // Drift remaining bricks inward when few are left
+  if (bricks.length > 0 && bricks.length <= 3 && !boss && launched) {
+    let driftSpeed = 12 + (3 - bricks.length) * 8; // faster with fewer bricks
+    for (let brick of bricks) {
+      brick.radius -= driftSpeed * effectiveDt;
+      // Don't drift past the inner core
+      if (brick.radius < INNER_RADIUS + 30) brick.radius = INNER_RADIUS + 30;
+    }
+  }
+
+  // Check level complete
+  if (bricks.length === 0 && !boss) {
+    level++;
+    levelsCleared++;
+    sfxLevelClear();
+    sfxFilterSweepUp();
+    levelTransition = 1.2;
+    levelTransitionRipple = 0;
+    generateLevel();
+    resetBall();
+    if (bossJustCleared) {
+      // Let "CORE SHATTERED!" land first, then announce the new level
+      const nextLevel = level;
+      setTimeout(() => { if (!gameOverFlag) addFloatingText(CX, CY, `LEVEL ${nextLevel}`, '#00ffff', 30); }, 750);
+      bossJustCleared = false;
+    } else {
+      addFloatingText(CX, CY, `LEVEL ${level}`, '#00ffff', 30);
+    }
+    sparkleRing(INNER_RADIUS + 40, '#00ffff', 25);
+    sparkleRing(PADDLE_RADIUS - 20, '#ffe600', 20);
+    // Portal ad break every 3 levels
+    if (levelsCleared > 0 && levelsCleared % 3 === 0) {
+      showPortalAd();
+    }
+  }
+
+  updateHUD();
+}
+
+// ─── DRAW ───────────────────────────────────────────────
+function draw() {
+  ctx.save();
+  ctx.translate(shakeX, shakeY);
+
+  ctx.clearRect(-10, -10, W + 20, H + 20);
+  ctx.fillStyle = '#06060f';
+  ctx.fillRect(-10, -10, W + 20, H + 20);
+
+  // Stars
+  let t = performance.now() / 1000;
+  for (let star of stars) {
+    let twinkle = star.brightness * (0.5 + 0.5 * Math.sin(t * star.twinkleSpeed));
+    ctx.fillStyle = `rgba(255,255,255,${twinkle})`;
+    ctx.beginPath();
+    ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Level transition ripple
+  if (levelTransition > 0) {
+    ctx.strokeStyle = `rgba(0, 255, 255, ${levelTransition * 0.4})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(CX, CY, levelTransitionRipple, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(255, 217, 61, ${levelTransition * 0.3})`;
+    ctx.beginPath();
+    ctx.arc(CX, CY, levelTransitionRipple * 0.7, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // Outer ring
+  ctx.strokeStyle = '#1a1a3a';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(CX, CY, OUTER_RADIUS, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Shield ring
+  if (shieldHits > 0) {
+    let alpha = Math.min(shieldHits / 3, 1) * (0.35 + 0.12 * Math.sin(t * 8));
+    ctx.strokeStyle = `rgba(180, 77, 255, ${alpha})`;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(CX, CY, OUTER_RADIUS - 2, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(180, 77, 255, ${alpha * 0.3})`;
+    ctx.lineWidth = 10;
+    ctx.stroke();
+  }
+
+  // Core
+  let bossPulseSpeed = boss ? 2.5 : 1; // faster pulse during boss
+  let pulseR = INNER_RADIUS + 3 * Math.sin(corePulse * bossPulseSpeed);
+  let coreGrad = ctx.createRadialGradient(CX, CY, 3, CX, CY, pulseR);
+  let h = Math.floor(coreHue);
+
+  if (boss && boss.hitFlash > 0) {
+    coreGrad.addColorStop(0, '#ffffff');
+    coreGrad.addColorStop(0.3, '#ff6600');
+    coreGrad.addColorStop(0.7, '#662200');
+    coreGrad.addColorStop(1, '#221100');
+  } else if (boss) {
+    // Angry boss core — red/orange tones, unstable shimmer
+    let bossFlicker = 0.8 + 0.2 * Math.sin(corePulse * 8);
+    let bossHue = 10 + 15 * Math.sin(corePulse * 3); // shifts between red and orange
+    coreGrad.addColorStop(0, `hsl(${bossHue}, 100%, ${65 * bossFlicker}%)`);
+    coreGrad.addColorStop(0.5, `hsl(${bossHue}, 90%, 25%)`);
+    coreGrad.addColorStop(1, `hsl(${bossHue}, 70%, 8%)`);
+  } else {
+    coreGrad.addColorStop(0, `hsl(${h}, 100%, 65%)`);
+    coreGrad.addColorStop(0.5, `hsl(${h}, 80%, 20%)`);
+    coreGrad.addColorStop(1, `hsl(${h}, 60%, 5%)`);
+  }
+  ctx.fillStyle = coreGrad;
+  ctx.beginPath();
+  ctx.arc(CX, CY, pulseR, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Core glow
+  let glowAlpha = boss ? 0.08 + 0.04 * Math.sin(corePulse * 3) : 0.04 + 0.02 * Math.sin(corePulse * 1.5);
+  let glowColor = boss ? `hsla(15, 100%, 50%, ${glowAlpha})` : `hsla(${h}, 100%, 60%, ${glowAlpha})`;
+  ctx.fillStyle = glowColor;
+  ctx.beginPath();
+  ctx.arc(CX, CY, pulseR + (boss ? 28 : 20), 0, Math.PI * 2);
+  ctx.fill();
+
+  // Boss HP ring
+  if (boss) {
+    let hpFrac = boss.hp / boss.maxHp;
+    let hpAngle = hpFrac * Math.PI * 2;
+    let hpRingR = INNER_RADIUS + 8;
+    // Background ring (depleted portion)
+    ctx.beginPath();
+    ctx.arc(CX, CY, hpRingR, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255, 50, 50, 0.15)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    // Filled portion — starts at top (-π/2), sweeps clockwise
+    if (hpFrac > 0) {
+      ctx.beginPath();
+      ctx.arc(CX, CY, hpRingR, -Math.PI / 2, -Math.PI / 2 + hpAngle);
+      let hpHue = hpFrac > 0.5 ? 30 : hpFrac > 0.25 ? 15 : 0; // orange → red as HP drops
+      ctx.strokeStyle = `hsla(${hpHue}, 100%, 55%, 0.9)`;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
+  }
+
+  // Boss shields
+  if (boss) {
+    for (let shield of boss.shields) {
+      let sa = shield.angle + boss.rotation - shield.arc / 2;
+      let ea = shield.angle + boss.rotation + shield.arc / 2;
+      let innerR = shield.radius - shield.thickness / 2;
+      let outerR = shield.radius + shield.thickness / 2;
+
+      ctx.beginPath();
+      ctx.arc(CX, CY, outerR, sa, ea);
+      ctx.arc(CX, CY, innerR, ea, sa, true);
+      ctx.closePath();
+
+      let shieldAlpha = 0.5 + (shield.hp / shield.maxHp) * 0.5;
+      ctx.fillStyle = `rgba(255, 102, 0, ${shieldAlpha})`;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 130, 30, 0.6)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+  }
+
+  // Bricks
+  for (let brick of bricks) {
+    let sa = brick.angle - brick.arc / 2;
+    let ea = brick.angle + brick.arc / 2;
+    let innerR = brick.radius - brick.thickness / 2;
+    let outerR = brick.radius + brick.thickness / 2;
+
+    ctx.beginPath();
+    ctx.arc(CX, CY, outerR, sa, ea);
+    ctx.arc(CX, CY, innerR, ea, sa, true);
+    ctx.closePath();
+
+    // Hit flash
+    if (brick.hitFlash > 0) {
+      brick.hitFlash -= 0.016;
+      ctx.fillStyle = '#ffffff';
+      ctx.globalAlpha = 0.5 + brick.hitFlash * 4;
+    } else {
+      let alpha = 0.55 + (brick.hp / brick.maxHp) * 0.45;
+      ctx.fillStyle = brick.color;
+      ctx.globalAlpha = alpha;
+    }
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 1;
+    ctx.stroke();
+
+    // HP
+    if (brick.maxHp > 1) {
+      let mx = CX + Math.cos(brick.angle) * brick.radius;
+      let my = CY + Math.sin(brick.angle) * brick.radius;
+      ctx.fillStyle = '#fff';
+      ctx.globalAlpha = 0.8;
+      ctx.font = 'bold 10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(brick.hp, mx, my);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // Paddle
+  let psa = paddleAngle - paddleArc / 2;
+  let pea = paddleAngle + paddleArc / 2;
+  ctx.beginPath();
+  ctx.arc(CX, CY, PADDLE_RADIUS + 10, psa, pea);
+  ctx.arc(CX, CY, PADDLE_RADIUS - 10, pea, psa, true);
+  ctx.closePath();
+
+  let isLarge = bigPaddleTimer > 0;
+  let isLaser = laserTimer > 0;
+  let paddleColor1 = isLaser ? '#cc4400' : '#00ccdd';
+  let paddleColor2 = isLaser ? '#ff6600' : '#00ffff';
+
+  let pg = ctx.createLinearGradient(
+    CX + Math.cos(psa) * PADDLE_RADIUS,
+    CY + Math.sin(psa) * PADDLE_RADIUS,
+    CX + Math.cos(pea) * PADDLE_RADIUS,
+    CY + Math.sin(pea) * PADDLE_RADIUS
+  );
+  pg.addColorStop(0, paddleColor1);
+  pg.addColorStop(1, paddleColor2);
+  ctx.fillStyle = pg;
+  ctx.fill();
+
+  ctx.strokeStyle = isLaser ? 'rgba(255,102,0,0.5)' : 'rgba(0,255,255,0.4)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Paddle glow
+  ctx.globalAlpha = 0.08;
+  ctx.beginPath();
+  ctx.arc(CX, CY, PADDLE_RADIUS + 18, psa, pea);
+  ctx.arc(CX, CY, PADDLE_RADIUS - 18, pea, psa, true);
+  ctx.closePath();
+  ctx.fillStyle = paddleColor2;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+
+  // Lasers
+  for (let l of lasers) {
+    ctx.fillStyle = '#ff6600';
+    ctx.globalAlpha = l.life * 2;
+    ctx.beginPath();
+    ctx.arc(l.x, l.y, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,102,0,0.3)';
+    ctx.beginPath();
+    ctx.arc(l.x, l.y, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // Power-ups
+  for (let pu of powerups) {
+    let pulseSize = 1 + 0.15 * Math.sin(pu.pulse);
+    let r = pu.radius * pulseSize;
+
+    // Glow
+    let hex = pu.color;
+    let rr = parseInt(hex.slice(1,3),16), gg = parseInt(hex.slice(3,5),16), bb = parseInt(hex.slice(5,7),16);
+    ctx.fillStyle = `rgba(${rr},${gg},${bb},0.15)`;
+    ctx.beginPath();
+    ctx.arc(pu.x, pu.y, r * 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Body
+    ctx.fillStyle = pu.color;
+    ctx.beginPath();
+    ctx.arc(pu.x, pu.y, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Label
+    ctx.fillStyle = '#06060f';
+    ctx.font = 'bold 8px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(pu.label, pu.x, pu.y);
+  }
+
+  // Particles
+  for (let p of particles) {
+    ctx.globalAlpha = Math.min(1, p.life * 2.5);
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * Math.min(1, p.life * 2), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // Floating texts
+  for (let ft of floatingTexts) {
+    ctx.globalAlpha = ft.life;
+    ctx.font = `bold ${ft.size}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = ft.size > 18 ? 5 : 3;
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+    ctx.strokeText(ft.text, ft.x, ft.y);
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = ft.color;
+    ctx.shadowBlur = 12;
+    ctx.fillText(ft.text, ft.x, ft.y);
+    ctx.shadowBlur = 0;
+  }
+  ctx.globalAlpha = 1;
+
+  // Balls — drawn on top of everything for visibility
+  for (let ball of balls) {
+    // Trail
+    for (let ti = 0; ti < ball.trail.length; ti++) {
+      let tp = ball.trail[ti];
+      let alpha = (ti / ball.trail.length) * 0.25;
+      let size = ball.radius * (ti / ball.trail.length) * 0.8;
+      ctx.fillStyle = ball.fire ? `rgba(255,150,0,${alpha})` : `rgba(200,240,255,${alpha})`;
+      ctx.beginPath();
+      ctx.arc(tp.x, tp.y, size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Outer glow — large soft halo so ball is always findable
+    let glowGrad = ctx.createRadialGradient(ball.x, ball.y, ball.radius, ball.x, ball.y, ball.radius * 5);
+    if (ball.fire) {
+      glowGrad.addColorStop(0, 'rgba(255,180,0,0.3)');
+      glowGrad.addColorStop(0.5, 'rgba(255,100,0,0.08)');
+      glowGrad.addColorStop(1, 'rgba(255,80,0,0)');
+    } else {
+      glowGrad.addColorStop(0, 'rgba(200,240,255,0.3)');
+      glowGrad.addColorStop(0.5, 'rgba(100,200,255,0.08)');
+      glowGrad.addColorStop(1, 'rgba(0,150,255,0)');
+    }
+    ctx.fillStyle = glowGrad;
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, ball.radius * 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Ball body — slightly larger for visibility
+    ctx.fillStyle = ball.fire ? '#ffcc44' : '#ffffff';
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, ball.radius + 1, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Bright inner highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.beginPath();
+    ctx.arc(ball.x - 1, ball.y - 1, ball.radius * 0.45, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Combo display (big center text when combo is high)
+  if (combo >= 5 && launched) {
+    let comboAlpha = 0.2 + Math.sin(t * 6) * 0.1;
+    ctx.font = `bold ${24 + combo}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 4;
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = `rgba(0,0,0,${comboAlpha * 0.8})`;
+    ctx.strokeText(`${combo}x`, CX, CY);
+    ctx.shadowColor = 'rgba(180, 77, 255, 0.8)';
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = `rgba(255, 255, 255, ${comboAlpha})`;
+    ctx.fillText(`${combo}x`, CX, CY);
+    ctx.shadowBlur = 0;
+  }
+
+  // First-run steering coach callout
+  if (coachActive && !launched && !gameOverFlag) {
+    let glow = 8 + 8 * (0.5 + 0.5 * Math.sin(t * 2)); // glow pulses; text stays solid + legible
+    let msg = isTouchDevice ? 'Drag to steer the paddle' : 'Move your mouse to steer the paddle';
+    ctx.font = 'bold 18px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.lineWidth = 4;
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(0,0,0,0.9)';
+    ctx.strokeText(msg, CX, CY - 40);
+    ctx.shadowColor = 'rgba(0,255,255,0.9)';
+    ctx.shadowBlur = glow;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(msg, CX, CY - 40);
+    ctx.shadowBlur = 0;
+    // Arc that tracks the paddle — reinforces "this is the thing you control"
+    ctx.strokeStyle = `rgba(0,255,255,${0.5 + 0.25 * Math.sin(t * 2)})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(CX, CY, PADDLE_RADIUS - 28, paddleAngle - 0.55, paddleAngle + 0.55);
+    ctx.stroke();
+  }
+
+  // Pre-launch text
+  if (!launched && !gameOverFlag) {
+    let launchAlpha = 0.4 + 0.15 * Math.sin(t * 3);
+    let launchMsg = isTouchDevice ? 'Tap to launch' : 'Click to launch';
+    ctx.font = '15px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.lineWidth = 3;
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = `rgba(0,0,0,${launchAlpha * 0.8})`;
+    ctx.strokeText(launchMsg, CX, CY + OUTER_RADIUS - 15);
+    ctx.fillStyle = `rgba(255,255,255,${launchAlpha})`;
+    ctx.fillText(launchMsg, CX, CY + OUTER_RADIUS - 15);
+  }
+
+  // Pause hint (fades after first 5 seconds of gameplay)
+  if (launched && !gameOverFlag && (t - gameStartTime) < 5) {
+    let hintAlpha = Math.max(0, 0.4 * (1 - (t - gameStartTime) / 5));
+    ctx.font = "11px sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillStyle = `rgba(255,255,255,${hintAlpha})`;
+    ctx.fillText("P to pause", canvas.width - 15, 25);
+  }
+
+  // Bricks remaining (in-game overlay, near top of play area)
+  if (launched && (bricks.length > 0 || boss)) {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.font = '11px sans-serif';
+    ctx.textAlign = 'center';
+    let brickText = `${bricks.length} left`;
+    ctx.fillText(brickText, CX, CY - OUTER_RADIUS + 18);
+  }
+
+  // Slow-mo indicator
+  if (slowTimer > 0) {
+    ctx.strokeStyle = `rgba(0, 255, 255, ${Math.min(1, slowTimer / 2) * 0.15})`;
+    ctx.lineWidth = OUTER_RADIUS * 2;
+    ctx.beginPath();
+    ctx.arc(CX, CY, OUTER_RADIUS, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+
+  // Update touch zone indicator dot position
+  if (isTouchDevice) {
+    let dot = document.getElementById('touchDot');
+    if (touchActive) {
+      let zone = document.getElementById('touchZone');
+      let zoneW = zone.offsetWidth;
+      let r = (zoneW / 2) - 10; // radius inside the circle, inset from edge
+      let cx = zoneW / 2 - 8;  // center minus half dot width
+      let cy = zoneW / 2 - 8;
+      dot.style.left = (cx + Math.cos(paddleAngle) * r) + 'px';
+      dot.style.top = (cy + Math.sin(paddleAngle) * r) + 'px';
+      if (!dot.classList.contains('visible')) dot.classList.add('visible');
+    } else {
+      dot.classList.remove('visible');
+    }
+  }
+}
+
+// ─── HELPERS ────────────────────────────────────────────
+function normalizeAngle(a) {
+  while (a > Math.PI) a -= 2 * Math.PI;
+  while (a < -Math.PI) a += 2 * Math.PI;
+  return a;
+}
+
+function lightenColor(hex, amount) {
+  if (hex.startsWith('hsl') || hex.startsWith('rgb')) return hex;
+  let r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+  r = Math.min(255, r + Math.floor((255 - r) * amount));
+  g = Math.min(255, g + Math.floor((255 - g) * amount));
+  b = Math.min(255, b + Math.floor((255 - b) * amount));
+  return `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`;
+}
+
+function updateHUD() {
+  // Desktop HUD
+  document.getElementById('hScore').textContent = score.toLocaleString();
+  document.getElementById('hLevel').textContent = level;
+  let hearts = '';
+  for (let i = 0; i < lives; i++) hearts += '❤️';
+  document.getElementById('hLives').textContent = hearts || '💔';
+  document.getElementById('hCombo').textContent = combo > 0 ? `${combo}x` : '—';
+  document.getElementById('hBricks').textContent = bricks.length;
+
+  // Mobile HUD
+  document.getElementById('mhScore').textContent = score.toLocaleString();
+  document.getElementById('mhLevel').textContent = level;
+  document.getElementById('mhLives').textContent = hearts || '💔';
+  let comboEl = document.getElementById('mhCombo');
+  comboEl.textContent = combo >= 3 ? `${combo}x` : '';
+
+  // Best score
+  let bestDisplay = bestScore > 0 ? bestScore.toLocaleString() : '—';
+  document.getElementById('hBest').textContent = bestDisplay;
+  document.getElementById('mhBest').textContent = bestScore > 0 ? `BEST ${bestDisplay}` : '';
+
+  // Active power-up indicator (mobile)
+  let puEl = document.getElementById('mhPowerup');
+  if (puEl) {
+    let activePU = '';
+    if (laserTimer > 0) { activePU = '🔴 LASER'; puEl.style.color = '#ff6600'; }
+    else if (bigPaddleTimer > 0) { activePU = '🩷 BIG'; puEl.style.color = '#00ffff'; }
+    else if (fireballTimer > 0) { activePU = '🔥 FIRE'; puEl.style.color = '#ffe600'; }
+    else if (slowTimer > 0) { activePU = '🐢 SLOW'; puEl.style.color = '#b44dff'; }
+    else if (shieldHits > 0) { activePU = `🛡️ SHIELD ×${shieldHits}`; puEl.style.color = '#b44dff'; }
+    puEl.textContent = activePU;
+  }
+}
+
+// ─── PORTAL AD BREAKS ────────────────────────────────────
+// Pauses audio, shows ad, resumes. Non-blocking for standalone.
+async function showPortalAd() {
+  if (!portal._ready) return;
+  portal.gameplayStop();
+  stopBeat();
+  if (audioCtx && audioCtx.state === 'running') audioCtx.suspend();
+  await portal.showAd();
+  if (audioCtx && audioCtx.state === 'suspended' && !GAMELAB_MUTED) audioCtx.resume();
+  if (!gameOverFlag && !paused) {
+    startBeat();
+    portal.gameplayStart();
+  }
+}
+
+const SHARE_URL = 'https://caldwellcourtneyc.github.io/game-lab/orbital-impact.html';
+function shareScore() {
+  const tail = SHARE_URL ? ` · beat it: ${SHARE_URL}` : '';
+  const msg = `Orbital Impact · Level ${level} · Score ${score.toLocaleString()}${tail}`;
+  const flash = () => {
+    const b = document.getElementById('shareBtn');
+    if (!b) return;
+    const orig = b.textContent;
+    b.textContent = 'COPIED!';
+    setTimeout(() => { b.textContent = orig; }, 1500);
+  };
+  const fallbackCopy = () => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = msg;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      flash();
+    } catch (e) {}
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(msg).then(flash).catch(fallbackCopy);
+  } else {
+    fallbackCopy();
+  }
+}
+
+function showGameOver() {
+  portal.gameplayStop();
+  showPortalAd(); // fire-and-forget — overlay shows immediately
+  let prevBest = bestScore;
+  let isNewBest = score > prevBest;
+
+  // Record into local top-5 history, then keep the single best key in sync
+  let saved = saveScore(score);
+  scoreHistory = saved.list;
+  bestScore = scoreHistory[0].score;
+  safeSetItem(BEST_KEY, bestScore);
+
+  document.getElementById('overlay').classList.add('show');
+  document.getElementById('oTitle').textContent = levelsCleared >= 5 ? '🌌 ORBIT COLLAPSED' : '💥 GAME OVER';
+
+  let bestLine = isNewBest
+    ? `<strong style="color:#ffe600">⭐ NEW BEST!</strong>`
+    : `<strong>Best:</strong> ${prevBest.toLocaleString()}`;
+
+  // Near-miss nudge — one-more-run motivation when the run came within 20% of best
+  let closeLine = '';
+  if (!isNewBest && prevBest > 0) {
+    let diff = prevBest - score;
+    if (diff > 0 && diff <= prevBest * 0.2) {
+      closeLine = `<br><span style="color:#ffe600">Just ${diff.toLocaleString()} from your best!</span>`;
+    }
+  }
+
+  // Top-5 chase list — this run marked if it made the cut
+  let historyRows = scoreHistory.map((e, i) => {
+    let mine = (i === saved.rank);
+    return `<div style="display:flex;justify-content:space-between;gap:20px;color:${mine ? '#00ffff' : '#8888aa'}">`
+      + `<span>${i + 1}. ${e.score.toLocaleString()}${mine ? ' ◄' : ''}</span>`
+      + `<span style="opacity:0.55">${e.date}</span></div>`;
+  }).join('');
+
+  document.getElementById('oStats').innerHTML = `
+    <strong>Score:</strong> ${score.toLocaleString()}<br>
+    ${bestLine}${closeLine}<br>
+    <strong>Levels Cleared:</strong> ${levelsCleared} · <strong>Max Combo:</strong> ${maxCombo}x<br>
+    <strong>Bricks Destroyed:</strong> ${totalBricksDestroyed}
+    <div style="margin-top:14px;text-align:left;display:inline-block;min-width:190px;font-size:0.82rem">
+      <div class="hud-label" style="margin-bottom:5px;color:#66a">Top 5</div>
+      ${historyRows}
+    </div>
+  `;
+}
+
+// ─── GAME LOOP ──────────────────────────────────────────
+function gameLoop(time) {
+  if (gameOverFlag) return;
+  let dt = (time - lastTime) / 1000;
+  lastTime = time;
+  if (dt > 0.1) dt = 0.016;
+  update(dt);
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+// ─── START & RESTART ────────────────────────────────────
+// Populate level select dropdown
+(function() {
+  let sel = document.getElementById('levelSelect');
+  for (let i = 1; i <= 15; i++) {
+    let opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = `Level ${i}`;
+    sel.appendChild(opt);
+  }
+  // Hide the level picker from first-time players — reads as a dev tool. Enable with ?dev
+  if (!DEV) {
+    const ls = document.querySelector('.level-select');
+    if (ls) ls.style.display = 'none';
+  } else {
+    console.info('[dev] level-select enabled · in-game: ] next level, [ prev level');
+  }
+})();
+
+function startGame() {
+  initAudio();
+  document.getElementById('startOverlay').classList.add('hide');
+  let startLevel = parseInt(document.getElementById('levelSelect').value) || 1;
+  initGame(startLevel);
+  gameStarted = true;
+  portal.gameplayStart();
+}
+
+function restartGame() {
+  initAudio();
+  initGame();
+  gameStarted = true;
+  portal.gameplayStart();
+}
+
+function initGame(startAt) {
+  score = 0;
+  level = startAt || 1;
+  lives = 3;
+  combo = 0;
+  maxCombo = 0;
+  gameOverFlag = false;
+  totalBricksDestroyed = 0;
+  levelsCleared = 0;
+  bigPaddleTimer = 0;
+  fireballTimer = 0;
+  slowTimer = 0;
+  shieldHits = 0;
+  laserTimer = 0;
+  laserCooldown = 0;
+  paddleArc = getBasePaddleArc(level);
+  particles = [];
+  floatingTexts = [];
+  lasers = [];
+  boss = null;
+  bossJustCleared = false;
+  const forceCoach = new URLSearchParams(window.location.search).has('coach');
+  coachActive = forceCoach || (!coachSeen && bestScore === 0 && level === 1);
+  if (coachActive && !forceCoach) coachSeen = true;
+  coachTime = 0;
+  slowMoTimer = 0;
+  freezeTimer = 0;
+  levelTransition = 0;
+
+  document.getElementById('overlay').classList.remove('show');
+
+  // Reset touch zone glow
+  let zone = document.getElementById('touchZone');
+  if (zone) zone.classList.remove('subtle');
+
+  generateLevel();
+  resetBall();
+  updateHUD();
+  updateAudioForCombo(0);
+  updateAudioForBoss(false);
+  startBeat();
+  lastTime = performance.now();
+  requestAnimationFrame(gameLoop);
+}
+
+// ─── INPUT ──────────────────────────────────────────────
+let touchMoved = false;
+let touchActive = false; // true while finger is on screen
+// Virtual center for circular touch control — set on touchstart, used on touchmove
+let vcx = null, vcy = null;
+const VIRTUAL_RADIUS = 60; // px above finger — the "orbit" radius for the gesture circle
+
+// Set controls hint text based on device
+if (isTouchDevice) {
+  let hintEl = document.getElementById('controlsHint');
+  if (hintEl) hintEl.textContent = 'Drag anywhere to steer · Tap to launch';
+}
+
+// Compute paddle angle from any screen position relative to canvas center (used for mouse)
+function updatePaddleFromScreen(clientX, clientY) {
+  let rect = canvas.getBoundingClientRect();
+  let scaleX = W / rect.width;
+  let scaleY = H / rect.height;
+  let canvasCenterX = rect.left + rect.width / 2;
+  let canvasCenterY = rect.top + rect.height / 2;
+  let mx = clientX - canvasCenterX;
+  let my = clientY - canvasCenterY;
+  return Math.atan2(my * scaleY, mx * scaleX);
+}
+
+document.addEventListener('mousemove', (e) => {
+  // During the first-run coach, ignore incidental mouse motion briefly so the demo is actually seen,
+  // then hand control over on the next move.
+  if (coachActive) {
+    if (coachTime < 2.2) return;
+    coachActive = false;
+  }
+  paddleAngle = updatePaddleFromScreen(e.clientX, e.clientY);
+});
+
+document.addEventListener('click', (e) => {
+  let tag = e.target.tagName;
+  if (tag === 'BUTTON' || tag === 'SELECT' || tag === 'OPTION' || tag === 'LABEL') return;
+  if (e.target.closest('.start-overlay, .pause-overlay, .game-over-overlay')) return;
+  if (!launched && gameStarted) launchBall();
+});
+
+// Touch: virtual circle — finger traces a circle around an invisible center,
+// paddle angle = finger's angle relative to that center. Full 360° from anywhere.
+function handleTouchMove(e) {
+  if (!gameStarted) return;
+  let tag = e.target.tagName;
+  if (tag === 'BUTTON' || tag === 'SELECT' || tag === 'OPTION') return;
+  e.preventDefault();
+  if (vcx === null) return;
+  touchMoved = true;
+  if (coachActive) {
+    if (coachTime < 2.2) return;
+    coachActive = false;
+  }
+  let touch = e.touches[0];
+  paddleAngle = Math.atan2(touch.clientY - vcy, touch.clientX - vcx);
+  // Make zone subtle after first move
+  if (!document.getElementById('touchZone').classList.contains('subtle')) {
+    document.getElementById('touchZone').classList.add('subtle');
+  }
+}
+
+function handleTouchStart(e) {
+  // Let buttons and selects handle their own events (fixes mobile Launch/level select)
+  let tag = e.target.tagName;
+  if (tag === 'BUTTON' || tag === 'SELECT' || tag === 'OPTION') return;
+  e.preventDefault();
+  touchMoved = false;
+  touchActive = true;
+  gameStarted = true;
+  let touch = e.touches[0];
+  // Always anchor virtual center to current paddle angle so paddle doesn't snap on re-touch.
+  // Reverse-engineer vcx/vcy so finger's position maps to existing paddleAngle.
+  vcx = touch.clientX - Math.cos(paddleAngle) * VIRTUAL_RADIUS;
+  vcy = touch.clientY - Math.sin(paddleAngle) * VIRTUAL_RADIUS;
+}
+
+function handleTouchEnd(e) {
+  // Launch on lift only if it was a tap (no drag) — prevents hairtrigger
+  if (!touchMoved && !launched && gameStarted) launchBall();
+  touchActive = false;
+  vcx = null;
+  vcy = null;
+}
+
+document.addEventListener('touchmove', handleTouchMove, { passive: false });
+document.addEventListener('touchstart', handleTouchStart, { passive: false });
+document.addEventListener('touchend', handleTouchEnd, { passive: true });
+
+// Show personal best on start overlay
+if (bestScore > 0) {
+  document.getElementById('startBest').textContent = `Personal Best: ${bestScore.toLocaleString()}`;
+}
+
+// ─── PAUSE SYSTEM ────────────────────────────────────────
+let paused = false;
+
+function pauseGame() {
+  if (!gameStarted || gameOverFlag || paused) return;
+  paused = true;
+  stopBeat();
+  if (audioCtx && audioCtx.state === 'running') audioCtx.suspend();
+  document.getElementById('pauseOverlay').classList.add('show');
+  portal.gameplayStop();
+}
+
+function resumeGame() {
+  if (!paused) return;
+  paused = false;
+  document.getElementById('pauseOverlay').classList.remove('show');
+  if (audioCtx && audioCtx.state === 'suspended' && !GAMELAB_MUTED) audioCtx.resume();
+  if (!gameOverFlag) startBeat();
+  lastTime = performance.now();
+  requestAnimationFrame(gameLoop);
+  portal.gameplayStart();
+}
+
+function togglePause() {
+  if (paused) resumeGame();
+  else pauseGame();
+}
+
+// ─── KEYBOARD EVENT PREVENTION ───────────────────────────
+// Dev-only: jump between levels to test boards without replaying (enable with ?dev)
+function devJumpLevel(delta) {
+  level = Math.max(1, level + delta);
+  boss = null;
+  bossJustCleared = false;
+  bricks = [];
+  powerups = [];
+  lasers = [];
+  generateLevel();
+  resetBall();
+  updateHUD();
+  addFloatingText(CX, CY, `LEVEL ${level}`, '#00ffff', 26);
+}
+document.addEventListener('keydown', (e) => {
+  // Prevent browser scroll/navigation for game keys
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space',' '].includes(e.key)) {
+    e.preventDefault();
+  }
+  // P toggles pause (ESC reserved by portals for fullscreen exit)
+  if (e.key === 'p' || e.key === 'P') {
+    e.preventDefault();
+    if (gameStarted && !gameOverFlag) togglePause();
+  }
+  // Dev-only level skip: ] next level, [ previous level
+  if (DEV && gameStarted && !gameOverFlag && !paused) {
+    if (e.key === ']') { e.preventDefault(); devJumpLevel(1); }
+    else if (e.key === '[') { e.preventDefault(); devJumpLevel(-1); }
+  }
+});
+
+// ─── VISIBILITY CHANGE (tab switch, alt-tab) ────────────
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && gameStarted && !gameOverFlag && !paused) {
+    pauseGame();
+  }
+});
+// blur pauses on desktop only — mobile fires blur for address bar, gestures, etc.
+if (!isTouchDevice) {
+  window.addEventListener('blur', () => {
+    if (gameStarted && !gameOverFlag && !paused) {
+      pauseGame();
+    }
+  });
+}
+
+// ─── PATCH GAME LOOP FOR PAUSE ───────────────────────────
+// Override the original gameLoop to respect pause state
+const _origGameLoop = gameLoop;
+gameLoop = function(time) {
+  if (paused) return;
+  _origGameLoop(time);
+};
+
+</script>
+</body>
+</html>

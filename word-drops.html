@@ -1,0 +1,9418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>WordDrops</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0c0c1a;
+    color: #e0e0e0;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    overflow: hidden;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  canvas {
+    display: block;
+    touch-action: none;
+  }
+
+  /* Word found animation */
+  .word-popup {
+    position: fixed;
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: #ffd93d;
+    text-shadow: 0 0 20px rgba(255, 217, 61, 0.5);
+    pointer-events: none;
+    animation: popUp 1.5s forwards;
+    z-index: 50;
+  }
+
+  @keyframes popUp {
+    0% { opacity: 1; transform: translateY(0) scale(1); }
+    100% { opacity: 0; transform: translateY(-60px) scale(1.3); }
+  }
+
+  /* Screen shake */
+  /* Magnitude scales with --shk (set per-clear by triggerShake): longer words / deeper chains shake harder */
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    10% { transform: translateX(calc(var(--shk, 1) * -5px)) rotate(calc(var(--shk, 1) * -0.5deg)); }
+    30% { transform: translateX(calc(var(--shk, 1) * 5px)) rotate(calc(var(--shk, 1) * 0.5deg)); }
+    50% { transform: translateX(calc(var(--shk, 1) * -3px)); }
+    70% { transform: translateX(calc(var(--shk, 1) * 3px)); }
+    90% { transform: translateX(calc(var(--shk, 1) * -1px)); }
+  }
+
+  canvas.shake { animation: shake 0.4s; }
+</style>
+</head>
+<body>
+
+<canvas id="game"></canvas>
+
+<script>
+// ============================================================
+// WORD DROPS — Sprint 1: Core Rewrite
+// State machine, two modes, player-controlled clearing
+// ============================================================
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+// ── Responsive Canvas ──────────────────────────────────────
+const DPR = Math.min(window.devicePixelRatio || 1, 2);
+let W, H, CELL, PADDING_X, PADDING_Y;
+let BOARD_PIXEL_X, BOARD_PIXEL_Y, BOARD_PIXEL_W, BOARD_PIXEL_H;
+
+const COLS = 8;
+const ROWS = 13;
+
+function resizeCanvas() {
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  canvas.width = W * DPR;
+  canvas.height = H * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+  // Calculate cell size to fit board with padding
+  const maxBoardW = W - 20;
+  const maxBoardH = H - 120; // leave room for HUD top bar
+  CELL = Math.floor(Math.min(maxBoardW / COLS, maxBoardH / ROWS));
+  CELL = Math.min(CELL, 48); // cap cell size on desktop
+
+  const boardW = COLS * CELL;
+  const boardH = ROWS * CELL;
+  BOARD_PIXEL_X = Math.floor((W - boardW) / 2);
+  BOARD_PIXEL_Y = Math.floor((H - boardH) / 2) + 30; // offset for HUD
+  BOARD_PIXEL_W = boardW;
+  BOARD_PIXEL_H = boardH;
+  PADDING_X = BOARD_PIXEL_X;
+  PADDING_Y = BOARD_PIXEL_Y;
+}
+
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+// ── Letter Data ────────────────────────────────────────────
+const LETTER_POOL = {
+  'A': { freq: 9, pts: 1 }, 'B': { freq: 2, pts: 3 }, 'C': { freq: 3, pts: 3 },
+  'D': { freq: 4, pts: 2 }, 'E': { freq: 12, pts: 1 }, 'F': { freq: 2, pts: 4 },
+  'G': { freq: 3, pts: 2 }, 'H': { freq: 3, pts: 4 }, 'I': { freq: 9, pts: 1 },
+  'J': { freq: 1, pts: 8 }, 'K': { freq: 1, pts: 5 }, 'L': { freq: 4, pts: 1 },
+  'M': { freq: 3, pts: 3 }, 'N': { freq: 6, pts: 1 }, 'O': { freq: 8, pts: 1 },
+  'P': { freq: 3, pts: 3 }, 'Q': { freq: 1, pts: 10 }, 'R': { freq: 6, pts: 1 },
+  'S': { freq: 6, pts: 1 }, 'T': { freq: 6, pts: 1 }, 'U': { freq: 4, pts: 1 },
+  'V': { freq: 2, pts: 4 }, 'W': { freq: 2, pts: 4 }, 'X': { freq: 1, pts: 8 },
+  'Y': { freq: 2, pts: 4 }, 'Z': { freq: 1, pts: 10 }
+};
+
+let LETTERS = [];
+for (let [letter, data] of Object.entries(LETTER_POOL)) {
+  for (let i = 0; i < data.freq; i++) LETTERS.push(letter);
+}
+
+const LETTER_COLORS = {
+  1: '#4d96ff', 2: '#6bcb77', 3: '#ffd93d',
+  4: '#ff6b6b', 5: '#bc8cff', 8: '#ff9a3c', 10: '#ff4757'
+};
+
+function getLetterColor(letter) {
+  return LETTER_COLORS[LETTER_POOL[letter].pts] || '#4d96ff';
+}
+
+function lightenColor(hex, amount) {
+  const r = Math.min(255, parseInt(hex.slice(1, 3), 16) + amount);
+  const g = Math.min(255, parseInt(hex.slice(3, 5), 16) + amount);
+  const b = Math.min(255, parseInt(hex.slice(5, 7), 16) + amount);
+  return `rgb(${r},${g},${b})`;
+}
+
+function darkenColor(hex, amount) {
+  const r = Math.max(0, parseInt(hex.slice(1, 3), 16) - amount);
+  const g = Math.max(0, parseInt(hex.slice(3, 5), 16) - amount);
+  const b = Math.max(0, parseInt(hex.slice(5, 7), 16) - amount);
+  return `rgb(${r},${g},${b})`;
+}
+
+// ── Dictionary ─────────────────────────────────────────────
+const DICTIONARY = new Set([
+  // === 3-letter words ===
+  "AAH",
+  "ABA",
+  "ABS",
+  "ACE",
+  "ACT",
+  "ADD",
+  "ADO",
+  "ADS",
+  "AFF",
+  "AFT",
+  "AGA",
+  "AGE",
+  "AGO",
+  "AHA",
+  "AID",
+  "AIM",
+  "AIN",
+  "AIR",
+  "ALA",
+  "ALE",
+  "ALL",
+  "ALS",
+  "ALT",
+  "AMA",
+  "AMI",
+  "AMP",
+  "ANA",
+  "AND",
+  "ANE",
+  "ANI",
+  "ANT",
+  "ANY",
+  "APE",
+  "APT",
+  "ARC",
+  "ARE",
+  "ARF",
+  "ARK",
+  "ARM",
+  "ART",
+  "ASH",
+  "ASK",
+  "ASP",
+  "ATE",
+  "ATT",
+  "AVA",
+  "AVE",
+  "AWA",
+  "AWE",
+  "AWL",
+  "AXE",
+  "AYE",
+  "BAA",
+  "BAD",
+  "BAG",
+  "BAH",
+  "BAL",
+  "BAM",
+  "BAN",
+  "BAP",
+  "BAR",
+  "BAS",
+  "BAT",
+  "BAY",
+  "BED",
+  "BEE",
+  "BEG",
+  "BEL",
+  "BEN",
+  "BET",
+  "BEY",
+  "BIB",
+  "BID",
+  "BIG",
+  "BIN",
+  "BIO",
+  "BIS",
+  "BIT",
+  "BIZ",
+  "BOA",
+  "BOB",
+  "BOD",
+  "BOG",
+  "BOO",
+  "BOP",
+  "BOS",
+  "BOT",
+  "BOW",
+  "BOX",
+  "BOY",
+  "BRA",
+  "BRO",
+  "BRR",
+  "BUB",
+  "BUD",
+  "BUG",
+  "BUM",
+  "BUN",
+  "BUR",
+  "BUS",
+  "BUT",
+  "BUY",
+  "BYE",
+  "CAB",
+  "CAD",
+  "CAM",
+  "CAN",
+  "CAP",
+  "CAR",
+  "CAT",
+  "CAW",
+  "CEE",
+  "CHI",
+  "CIS",
+  "COB",
+  "COD",
+  "COG",
+  "COL",
+  "CON",
+  "COO",
+  "COP",
+  "COR",
+  "COS",
+  "COT",
+  "COW",
+  "COX",
+  "COY",
+  "COZ",
+  "CRY",
+  "CUB",
+  "CUE",
+  "CUP",
+  "CUR",
+  "CUT",
+  "DAB",
+  "DAD",
+  "DAG",
+  "DAH",
+  "DAL",
+  "DAM",
+  "DAY",
+  "DEB",
+  "DEE",
+  "DEL",
+  "DEN",
+  "DEV",
+  "DEW",
+  "DEX",
+  "DEY",
+  "DIB",
+  "DID",
+  "DIE",
+  "DIG",
+  "DIM",
+  "DIN",
+  "DIP",
+  "DIS",
+  "DIT",
+  "DOC",
+  "DOE",
+  "DOG",
+  "DOL",
+  "DOM",
+  "DON",
+  "DOR",
+  "DOS",
+  "DOT",
+  "DOW",
+  "DRY",
+  "DUB",
+  "DUD",
+  "DUE",
+  "DUG",
+  "DUI",
+  "DUN",
+  "DUO",
+  "DYE",
+  "EAR",
+  "EAT",
+  "EAU",
+  "EBB",
+  "EEL",
+  "EFF",
+  "EGG",
+  "EGO",
+  "ELF",
+  "ELK",
+  "ELL",
+  "ELM",
+  "ELS",
+  "EMF",
+  "EMS",
+  "EMU",
+  "END",
+  "ENG",
+  "ERA",
+  "ERE",
+  "ERN",
+  "ERR",
+  "ERS",
+  "ESS",
+  "ETA",
+  "ETH",
+  "EVE",
+  "EWE",
+  "EYE",
+  "FAD",
+  "FAN",
+  "FAR",
+  "FAT",
+  "FAX",
+  "FAY",
+  "FED",
+  "FEE",
+  "FEN",
+  "FER",
+  "FET",
+  "FEW",
+  "FEY",
+  "FEZ",
+  "FIB",
+  "FIE",
+  "FIG",
+  "FIL",
+  "FIN",
+  "FIR",
+  "FIT",
+  "FIX",
+  "FLU",
+  "FLY",
+  "FOB",
+  "FOE",
+  "FOG",
+  "FON",
+  "FOP",
+  "FOR",
+  "FOU",
+  "FOX",
+  "FOY",
+  "FRO",
+  "FRY",
+  "FUN",
+  "FUR",
+  "GAB",
+  "GAD",
+  "GAE",
+  "GAG",
+  "GAL",
+  "GAM",
+  "GAN",
+  "GAP",
+  "GAR",
+  "GAS",
+  "GAT",
+  "GAY",
+  "GED",
+  "GEE",
+  "GEL",
+  "GEM",
+  "GEN",
+  "GET",
+  "GIB",
+  "GIE",
+  "GIG",
+  "GIN",
+  "GIT",
+  "GNU",
+  "GOA",
+  "GOB",
+  "GOD",
+  "GOO",
+  "GOR",
+  "GOT",
+  "GOY",
+  "GUL",
+  "GUM",
+  "GUN",
+  "GUT",
+  "GUV",
+  "GUY",
+  "GYM",
+  "HAD",
+  "HAE",
+  "HAG",
+  "HAH",
+  "HAJ",
+  "HAM",
+  "HAO",
+  "HAP",
+  "HAS",
+  "HAT",
+  "HAW",
+  "HAY",
+  "HEH",
+  "HEM",
+  "HEN",
+  "HEP",
+  "HER",
+  "HES",
+  "HET",
+  "HEX",
+  "HEY",
+  "HIC",
+  "HID",
+  "HIE",
+  "HIM",
+  "HIN",
+  "HIP",
+  "HIS",
+  "HIT",
+  "HMM",
+  "HOE",
+  "HOG",
+  "HON",
+  "HOP",
+  "HOT",
+  "HOW",
+  "HOY",
+  "HUB",
+  "HUE",
+  "HUG",
+  "HUH",
+  "HUM",
+  "HUN",
+  "HUP",
+  "HUT",
+  "ICE",
+  "ICH",
+  "ICK",
+  "ICY",
+  "IDS",
+  "IFS",
+  "ILK",
+  "ILL",
+  "IMP",
+  "INK",
+  "INN",
+  "INS",
+  "ION",
+  "IRE",
+  "ITS",
+  "IVY",
+  "JAB",
+  "JAG",
+  "JAM",
+  "JAR",
+  "JAW",
+  "JAY",
+  "JEE",
+  "JET",
+  "JEW",
+  "JIB",
+  "JIG",
+  "JIN",
+  "JOB",
+  "JOE",
+  "JOG",
+  "JOT",
+  "JOY",
+  "JUG",
+  "JUN",
+  "JUS",
+  "JUT",
+  "KAT",
+  "KAY",
+  "KEG",
+  "KEN",
+  "KEY",
+  "KID",
+  "KIF",
+  "KIN",
+  "KIP",
+  "KIR",
+  "KIT",
+  "KOI",
+  "KOR",
+  "LAB",
+  "LAC",
+  "LAD",
+  "LAG",
+  "LAM",
+  "LAP",
+  "LAR",
+  "LAS",
+  "LAT",
+  "LAW",
+  "LAX",
+  "LAY",
+  "LEA",
+  "LED",
+  "LEE",
+  "LEG",
+  "LEI",
+  "LEK",
+  "LET",
+  "LEU",
+  "LEV",
+  "LEX",
+  "LEY",
+  "LIB",
+  "LID",
+  "LIE",
+  "LIN",
+  "LIP",
+  "LIS",
+  "LIT",
+  "LOB",
+  "LOG",
+  "LOO",
+  "LOP",
+  "LOT",
+  "LOW",
+  "LOX",
+  "LUG",
+  "LUM",
+  "LUV",
+  "LUX",
+  "LYE",
+  "MAC",
+  "MAD",
+  "MAE",
+  "MAG",
+  "MAN",
+  "MAP",
+  "MAR",
+  "MAS",
+  "MAT",
+  "MAW",
+  "MAX",
+  "MAY",
+  "MED",
+  "MEL",
+  "MEM",
+  "MEN",
+  "MET",
+  "MEW",
+  "MID",
+  "MIG",
+  "MIL",
+  "MIM",
+  "MIR",
+  "MIS",
+  "MIX",
+  "MOB",
+  "MOD",
+  "MOL",
+  "MOM",
+  "MON",
+  "MOO",
+  "MOP",
+  "MOR",
+  "MOS",
+  "MOT",
+  "MOW",
+  "MUD",
+  "MUG",
+  "MUM",
+  "MUN",
+  "MUS",
+  "NAB",
+  "NAE",
+  "NAG",
+  "NAH",
+  "NAM",
+  "NAN",
+  "NAP",
+  "NAW",
+  "NAY",
+  "NEB",
+  "NEE",
+  "NET",
+  "NEW",
+  "NIL",
+  "NIM",
+  "NIP",
+  "NIT",
+  "NIX",
+  "NOB",
+  "NOD",
+  "NOG",
+  "NOH",
+  "NOM",
+  "NOO",
+  "NOR",
+  "NOS",
+  "NOT",
+  "NOW",
+  "NUB",
+  "NUN",
+  "NUT",
+  "OAF",
+  "OAK",
+  "OAR",
+  "OAT",
+  "OBI",
+  "ODD",
+  "ODE",
+  "ODS",
+  "OFF",
+  "OFT",
+  "OHM",
+  "OHO",
+  "OIL",
+  "OKA",
+  "OLD",
+  "OLE",
+  "ONE",
+  "ONS",
+  "OOH",
+  "OOT",
+  "OPE",
+  "OPS",
+  "OPT",
+  "ORA",
+  "ORB",
+  "ORC",
+  "ORE",
+  "OUR",
+  "OUT",
+  "OWE",
+  "OWL",
+  "OWN",
+  "OXO",
+  "OXY",
+  "PAC",
+  "PAD",
+  "PAH",
+  "PAL",
+  "PAM",
+  "PAN",
+  "PAP",
+  "PAR",
+  "PAS",
+  "PAT",
+  "PAW",
+  "PAX",
+  "PAY",
+  "PEA",
+  "PED",
+  "PEE",
+  "PEG",
+  "PEN",
+  "PEP",
+  "PER",
+  "PET",
+  "PEW",
+  "PHI",
+  "PIA",
+  "PIC",
+  "PIE",
+  "PIG",
+  "PIN",
+  "PIP",
+  "PIT",
+  "PIU",
+  "PIX",
+  "PLY",
+  "POD",
+  "POI",
+  "POL",
+  "POM",
+  "POP",
+  "POT",
+  "POW",
+  "POX",
+  "PRO",
+  "PRY",
+  "PSI",
+  "PUB",
+  "PUD",
+  "PUG",
+  "PUN",
+  "PUP",
+  "PUS",
+  "PUT",
+  "QUA",
+  "RAD",
+  "RAG",
+  "RAH",
+  "RAJ",
+  "RAM",
+  "RAN",
+  "RAP",
+  "RAS",
+  "RAT",
+  "RAW",
+  "RAY",
+  "REB",
+  "REC",
+  "RED",
+  "REE",
+  "REF",
+  "REG",
+  "REI",
+  "REM",
+  "REP",
+  "RES",
+  "REV",
+  "REX",
+  "RHO",
+  "RIA",
+  "RIB",
+  "RID",
+  "RIG",
+  "RIM",
+  "RIN",
+  "RIP",
+  "ROB",
+  "ROC",
+  "ROD",
+  "ROE",
+  "ROM",
+  "ROT",
+  "ROW",
+  "RUB",
+  "RUE",
+  "RUG",
+  "RUM",
+  "RUN",
+  "RUT",
+  "RYE",
+  "SAC",
+  "SAD",
+  "SAE",
+  "SAG",
+  "SAL",
+  "SAP",
+  "SAT",
+  "SAU",
+  "SAW",
+  "SAX",
+  "SAY",
+  "SEA",
+  "SEC",
+  "SEE",
+  "SEI",
+  "SEN",
+  "SER",
+  "SET",
+  "SEW",
+  "SEX",
+  "SHA",
+  "SHE",
+  "SHH",
+  "SHY",
+  "SIC",
+  "SIM",
+  "SIN",
+  "SIP",
+  "SIR",
+  "SIS",
+  "SIT",
+  "SIX",
+  "SKA",
+  "SKI",
+  "SKY",
+  "SLY",
+  "SOB",
+  "SOD",
+  "SOL",
+  "SON",
+  "SOP",
+  "SOS",
+  "SOT",
+  "SOU",
+  "SOW",
+  "SOX",
+  "SOY",
+  "SPA",
+  "SPY",
+  "SRI",
+  "STY",
+  "SUB",
+  "SUE",
+  "SUM",
+  "SUN",
+  "SUP",
+  "TAB",
+  "TAD",
+  "TAE",
+  "TAG",
+  "TAJ",
+  "TAM",
+  "TAN",
+  "TAO",
+  "TAP",
+  "TAR",
+  "TAS",
+  "TAT",
+  "TAU",
+  "TAX",
+  "TEA",
+  "TED",
+  "TEE",
+  "TEL",
+  "TEN",
+  "TET",
+  "THE",
+  "THO",
+  "THY",
+  "TIC",
+  "TIE",
+  "TIL",
+  "TIN",
+  "TIP",
+  "TIS",
+  "TIT",
+  "TOD",
+  "TOE",
+  "TOM",
+  "TON",
+  "TOO",
+  "TOP",
+  "TOR",
+  "TOT",
+  "TOW",
+  "TOY",
+  "TRY",
+  "TSK",
+  "TUB",
+  "TUG",
+  "TUI",
+  "TUN",
+  "TUT",
+  "TUX",
+  "TWA",
+  "TWO",
+  "TYE",
+  "UDO",
+  "UGH",
+  "UMM",
+  "UMP",
+  "UNS",
+  "UPS",
+  "URN",
+  "USE",
+  "UTA",
+  "VAC",
+  "VAN",
+  "VAR",
+  "VAS",
+  "VAT",
+  "VEE",
+  "VEG",
+  "VET",
+  "VEX",
+  "VIA",
+  "VIE",
+  "VIG",
+  "VIS",
+  "VOW",
+  "WAD",
+  "WAG",
+  "WAN",
+  "WAR",
+  "WAS",
+  "WAT",
+  "WAX",
+  "WAY",
+  "WEB",
+  "WED",
+  "WEE",
+  "WEN",
+  "WET",
+  "WHA",
+  "WHO",
+  "WHY",
+  "WIG",
+  "WIN",
+  "WIT",
+  "WIZ",
+  "WOE",
+  "WOK",
+  "WON",
+  "WOO",
+  "WOW",
+  "WRY",
+  "YAH",
+  "YAK",
+  "YAM",
+  "YAP",
+  "YAR",
+  "YAW",
+  "YAY",
+  "YEA",
+  "YEH",
+  "YEN",
+  "YEP",
+  "YES",
+  "YET",
+  "YEW",
+  "YIN",
+  "YIP",
+  "YOD",
+  "YOM",
+  "YON",
+  "YOU",
+  "YOW",
+  "YUK",
+  "YUM",
+  "YUP",
+  "ZAG",
+  "ZAP",
+  "ZED",
+  "ZEE",
+  "ZIG",
+  "ZIN",
+  "ZIP",
+  "ZIT",
+  "ZOO",
+
+  // === 4-letter words ===
+  "ABBA",
+  "ABED",
+  "ABLE",
+  "ACED",
+  "ACES",
+  "ACHE",
+  "ACID",
+  "ACNE",
+  "ACRE",
+  "ACTS",
+  "ADDS",
+  "AFAR",
+  "AGED",
+  "AGES",
+  "AGHA",
+  "AHEM",
+  "AHOY",
+  "AIDE",
+  "AIDS",
+  "AILS",
+  "AIMS",
+  "AIRS",
+  "AKIN",
+  "ALAN",
+  "ALAS",
+  "ALBA",
+  "ALEC",
+  "ALFA",
+  "ALLY",
+  "ALMA",
+  "ALMS",
+  "ALPS",
+  "ALSO",
+  "ALTO",
+  "AMEN",
+  "AMID",
+  "AMIN",
+  "AMIR",
+  "AMMO",
+  "AMOK",
+  "ANAL",
+  "ANEW",
+  "ANNA",
+  "ANTE",
+  "ANTI",
+  "ANTS",
+  "ANUS",
+  "APES",
+  "APEX",
+  "AQUA",
+  "ARCH",
+  "AREA",
+  "ARES",
+  "ARIA",
+  "ARID",
+  "ARMS",
+  "ARMY",
+  "ARSE",
+  "ARTS",
+  "ARTY",
+  "ASKS",
+  "ATOM",
+  "ATOP",
+  "AULD",
+  "AUNT",
+  "AURA",
+  "AUTO",
+  "AVID",
+  "AWAY",
+  "AWOL",
+  "AWRY",
+  "AXEL",
+  "AXES",
+  "AXIS",
+  "AXLE",
+  "BAAL",
+  "BABA",
+  "BABE",
+  "BABU",
+  "BABY",
+  "BACH",
+  "BACK",
+  "BAGS",
+  "BAHT",
+  "BAIL",
+  "BAIT",
+  "BAKE",
+  "BALD",
+  "BALE",
+  "BALL",
+  "BALM",
+  "BAND",
+  "BANE",
+  "BANG",
+  "BANK",
+  "BARB",
+  "BARD",
+  "BARE",
+  "BARF",
+  "BARK",
+  "BARN",
+  "BARS",
+  "BASE",
+  "BASH",
+  "BASK",
+  "BASS",
+  "BATH",
+  "BATS",
+  "BAYS",
+  "BEAD",
+  "BEAK",
+  "BEAM",
+  "BEAN",
+  "BEAR",
+  "BEAT",
+  "BEAU",
+  "BECK",
+  "BEDS",
+  "BEEF",
+  "BEEN",
+  "BEEP",
+  "BEER",
+  "BEES",
+  "BEET",
+  "BEGS",
+  "BELL",
+  "BELT",
+  "BEND",
+  "BENE",
+  "BENT",
+  "BERG",
+  "BEST",
+  "BETA",
+  "BETH",
+  "BETS",
+  "BIAS",
+  "BIDE",
+  "BIDS",
+  "BIFF",
+  "BIKE",
+  "BILE",
+  "BILL",
+  "BIND",
+  "BINS",
+  "BIOS",
+  "BIRD",
+  "BITE",
+  "BITS",
+  "BLAH",
+  "BLAM",
+  "BLED",
+  "BLEW",
+  "BLIP",
+  "BLOB",
+  "BLOC",
+  "BLOT",
+  "BLOW",
+  "BLUE",
+  "BLUR",
+  "BOAR",
+  "BOAT",
+  "BODY",
+  "BOIL",
+  "BOLD",
+  "BOLO",
+  "BOLT",
+  "BOMB",
+  "BOND",
+  "BONE",
+  "BONG",
+  "BONY",
+  "BOOK",
+  "BOOM",
+  "BOON",
+  "BOOT",
+  "BORA",
+  "BORE",
+  "BORN",
+  "BOSS",
+  "BOTH",
+  "BOTS",
+  "BOUT",
+  "BOWL",
+  "BOWS",
+  "BOXY",
+  "BOYS",
+  "BOZO",
+  "BRAD",
+  "BRAG",
+  "BRAN",
+  "BRAS",
+  "BRAT",
+  "BRAY",
+  "BRED",
+  "BREE",
+  "BREN",
+  "BREW",
+  "BRIE",
+  "BRIG",
+  "BRIM",
+  "BRIT",
+  "BROS",
+  "BROW",
+  "BUBS",
+  "BUCK",
+  "BUDS",
+  "BUFF",
+  "BUGS",
+  "BULB",
+  "BULK",
+  "BULL",
+  "BUMP",
+  "BUMS",
+  "BUNG",
+  "BUNK",
+  "BUNS",
+  "BUOY",
+  "BURN",
+  "BURP",
+  "BURR",
+  "BURY",
+  "BUSH",
+  "BUST",
+  "BUSY",
+  "BUTS",
+  "BUTT",
+  "BUYS",
+  "BUZZ",
+  "BYTE",
+  "CABS",
+  "CADE",
+  "CAFE",
+  "CAGE",
+  "CAIN",
+  "CAKE",
+  "CALF",
+  "CALL",
+  "CALM",
+  "CAME",
+  "CAMP",
+  "CAMS",
+  "CANE",
+  "CANS",
+  "CANT",
+  "CAPE",
+  "CAPS",
+  "CARB",
+  "CARD",
+  "CARE",
+  "CARL",
+  "CARP",
+  "CARR",
+  "CARS",
+  "CART",
+  "CASA",
+  "CASE",
+  "CASH",
+  "CAST",
+  "CATE",
+  "CATS",
+  "CAVE",
+  "CAWS",
+  "CELL",
+  "CENT",
+  "CHAD",
+  "CHAO",
+  "CHAP",
+  "CHAR",
+  "CHAT",
+  "CHEF",
+  "CHEW",
+  "CHEZ",
+  "CHIC",
+  "CHIN",
+  "CHIP",
+  "CHIT",
+  "CHOP",
+  "CHOW",
+  "CHUG",
+  "CHUM",
+  "CIAO",
+  "CITE",
+  "CITY",
+  "CLAD",
+  "CLAM",
+  "CLAN",
+  "CLAP",
+  "CLAW",
+  "CLAY",
+  "CLIP",
+  "CLOG",
+  "CLOT",
+  "CLUB",
+  "CLUE",
+  "COAL",
+  "COAT",
+  "COAX",
+  "COBB",
+  "COCA",
+  "COCO",
+  "CODE",
+  "COIL",
+  "COIN",
+  "COKE",
+  "COLA",
+  "COLD",
+  "COLE",
+  "COLT",
+  "COMA",
+  "COMB",
+  "COME",
+  "COMP",
+  "CONE",
+  "CONN",
+  "CONS",
+  "COOK",
+  "COOL",
+  "COOP",
+  "COOS",
+  "COOT",
+  "COPE",
+  "COPS",
+  "COPY",
+  "CORD",
+  "CORE",
+  "CORK",
+  "CORN",
+  "CORY",
+  "COST",
+  "COSY",
+  "COUP",
+  "COVE",
+  "COWL",
+  "COWS",
+  "COZY",
+  "CRAB",
+  "CRAM",
+  "CREW",
+  "CRIB",
+  "CRIS",
+  "CROC",
+  "CROP",
+  "CROW",
+  "CRUD",
+  "CRUX",
+  "CUBE",
+  "CUBS",
+  "CUES",
+  "CUFF",
+  "CULT",
+  "CUPS",
+  "CURB",
+  "CURD",
+  "CURE",
+  "CURL",
+  "CURT",
+  "CUSS",
+  "CUTE",
+  "CUTS",
+  "CYST",
+  "CZAR",
+  "DADA",
+  "DADS",
+  "DAFT",
+  "DAHL",
+  "DALE",
+  "DAME",
+  "DAMP",
+  "DAMS",
+  "DANG",
+  "DARE",
+  "DARK",
+  "DARN",
+  "DART",
+  "DASH",
+  "DATA",
+  "DATE",
+  "DAVY",
+  "DAWN",
+  "DAYS",
+  "DAZE",
+  "DEAD",
+  "DEAF",
+  "DEAL",
+  "DEAN",
+  "DEAR",
+  "DEBS",
+  "DEBT",
+  "DECK",
+  "DEED",
+  "DEEM",
+  "DEEP",
+  "DEER",
+  "DEFY",
+  "DEKE",
+  "DELI",
+  "DELL",
+  "DEMO",
+  "DENS",
+  "DENT",
+  "DENY",
+  "DESK",
+  "DEVA",
+  "DIAL",
+  "DIBS",
+  "DICE",
+  "DIED",
+  "DIES",
+  "DIET",
+  "DIGS",
+  "DILL",
+  "DIME",
+  "DINE",
+  "DING",
+  "DINK",
+  "DIPS",
+  "DIRE",
+  "DIRK",
+  "DIRT",
+  "DISC",
+  "DISH",
+  "DISK",
+  "DIVA",
+  "DIVE",
+  "DOCK",
+  "DOCS",
+  "DODO",
+  "DOER",
+  "DOES",
+  "DOGS",
+  "DOJO",
+  "DOLE",
+  "DOLL",
+  "DOME",
+  "DONA",
+  "DONE",
+  "DONG",
+  "DOOM",
+  "DOOR",
+  "DOPE",
+  "DORK",
+  "DORM",
+  "DORY",
+  "DOSE",
+  "DOST",
+  "DOTH",
+  "DOTS",
+  "DOVE",
+  "DOWN",
+  "DOZE",
+  "DOZY",
+  "DRAB",
+  "DRAG",
+  "DRAT",
+  "DRAW",
+  "DREW",
+  "DRIP",
+  "DROP",
+  "DRUG",
+  "DRUM",
+  "DUAL",
+  "DUCE",
+  "DUCK",
+  "DUCT",
+  "DUDE",
+  "DUDS",
+  "DUEL",
+  "DUES",
+  "DUET",
+  "DUFF",
+  "DUKE",
+  "DULL",
+  "DULY",
+  "DUMB",
+  "DUMP",
+  "DUNE",
+  "DUNG",
+  "DUNK",
+  "DUPE",
+  "DUSK",
+  "DUST",
+  "DUTY",
+  "DYED",
+  "DYER",
+  "EACH",
+  "EARL",
+  "EARN",
+  "EARS",
+  "EASE",
+  "EAST",
+  "EASY",
+  "EATS",
+  "ECHO",
+  "EDDY",
+  "EDGE",
+  "EDGY",
+  "EDIT",
+  "EELS",
+  "EGGS",
+  "EGOS",
+  "ELSE",
+  "EMIR",
+  "EMIT",
+  "ENDS",
+  "ENVY",
+  "EONS",
+  "EPIC",
+  "ERGO",
+  "EROS",
+  "EURO",
+  "EVEN",
+  "EVER",
+  "EVIL",
+  "EXAM",
+  "EXEC",
+  "EXES",
+  "EXIT",
+  "EXPO",
+  "EYED",
+  "EYES",
+  "EYRE",
+  "FACE",
+  "FACT",
+  "FADE",
+  "FAIL",
+  "FAIR",
+  "FAKE",
+  "FALL",
+  "FAME",
+  "FANG",
+  "FANS",
+  "FARE",
+  "FARM",
+  "FAST",
+  "FATE",
+  "FATS",
+  "FAUX",
+  "FAWN",
+  "FEAR",
+  "FEAT",
+  "FEDS",
+  "FEED",
+  "FEEL",
+  "FEES",
+  "FEET",
+  "FELL",
+  "FELT",
+  "FEND",
+  "FERN",
+  "FESS",
+  "FEUD",
+  "FIAT",
+  "FIDO",
+  "FIFE",
+  "FIGS",
+  "FILE",
+  "FILL",
+  "FILM",
+  "FIND",
+  "FINE",
+  "FINK",
+  "FINS",
+  "FIRE",
+  "FIRM",
+  "FISH",
+  "FIST",
+  "FITS",
+  "FIVE",
+  "FIZZ",
+  "FLAG",
+  "FLAK",
+  "FLAP",
+  "FLAT",
+  "FLAW",
+  "FLAY",
+  "FLEA",
+  "FLED",
+  "FLEE",
+  "FLEW",
+  "FLEX",
+  "FLIP",
+  "FLOG",
+  "FLOP",
+  "FLOW",
+  "FLUX",
+  "FOAL",
+  "FOAM",
+  "FOES",
+  "FOIL",
+  "FOLD",
+  "FOLK",
+  "FOND",
+  "FONT",
+  "FOOD",
+  "FOOL",
+  "FOOT",
+  "FORA",
+  "FORD",
+  "FORE",
+  "FORK",
+  "FORM",
+  "FORT",
+  "FOUL",
+  "FOUR",
+  "FOWL",
+  "FOXY",
+  "FRAT",
+  "FRAY",
+  "FREE",
+  "FRET",
+  "FROG",
+  "FROM",
+  "FUEL",
+  "FUJI",
+  "FULL",
+  "FUND",
+  "FUNK",
+  "FURS",
+  "FURY",
+  "FUSE",
+  "FUSS",
+  "FUZZ",
+  "GABY",
+  "GAFF",
+  "GAGA",
+  "GAGE",
+  "GAGS",
+  "GAIN",
+  "GAIT",
+  "GALA",
+  "GALE",
+  "GALL",
+  "GALS",
+  "GAME",
+  "GANG",
+  "GAPS",
+  "GARB",
+  "GASH",
+  "GASP",
+  "GATE",
+  "GAVE",
+  "GAYS",
+  "GAZE",
+  "GEAR",
+  "GEEK",
+  "GEEZ",
+  "GEMS",
+  "GENE",
+  "GENT",
+  "GERM",
+  "GETS",
+  "GEUM",
+  "GIFT",
+  "GIGS",
+  "GILL",
+  "GIMP",
+  "GIRL",
+  "GIST",
+  "GIVE",
+  "GLAD",
+  "GLEE",
+  "GLEN",
+  "GLOW",
+  "GLUE",
+  "GLUM",
+  "GOAL",
+  "GOAT",
+  "GODS",
+  "GOES",
+  "GOLD",
+  "GOLF",
+  "GONE",
+  "GONG",
+  "GOOD",
+  "GOOF",
+  "GOON",
+  "GORE",
+  "GORY",
+  "GOSH",
+  "GOUT",
+  "GOWN",
+  "GRAB",
+  "GRAD",
+  "GRAM",
+  "GRAN",
+  "GRAY",
+  "GREW",
+  "GREY",
+  "GRID",
+  "GRIM",
+  "GRIN",
+  "GRIP",
+  "GRIT",
+  "GROG",
+  "GROW",
+  "GRUB",
+  "GUAN",
+  "GULF",
+  "GULL",
+  "GULP",
+  "GUMS",
+  "GUNS",
+  "GURU",
+  "GUST",
+  "GUTS",
+  "GUYS",
+  "GYRO",
+  "HACK",
+  "HAHA",
+  "HAIL",
+  "HAIR",
+  "HAJI",
+  "HALE",
+  "HALF",
+  "HALL",
+  "HALO",
+  "HALT",
+  "HAND",
+  "HANG",
+  "HANK",
+  "HARD",
+  "HARE",
+  "HARK",
+  "HARM",
+  "HARP",
+  "HART",
+  "HASH",
+  "HAST",
+  "HATE",
+  "HATH",
+  "HATS",
+  "HAUL",
+  "HAVE",
+  "HAWK",
+  "HAZE",
+  "HAZY",
+  "HEAD",
+  "HEAL",
+  "HEAP",
+  "HEAR",
+  "HEAT",
+  "HECK",
+  "HEED",
+  "HEEL",
+  "HEIL",
+  "HEIR",
+  "HELD",
+  "HELM",
+  "HELO",
+  "HELP",
+  "HEMP",
+  "HENS",
+  "HERB",
+  "HERD",
+  "HERE",
+  "HERO",
+  "HERS",
+  "HICK",
+  "HIDE",
+  "HIGH",
+  "HIKE",
+  "HILL",
+  "HILT",
+  "HIND",
+  "HINT",
+  "HIPS",
+  "HIRE",
+  "HISS",
+  "HIST",
+  "HITS",
+  "HIVE",
+  "HOAX",
+  "HOBO",
+  "HOCK",
+  "HOES",
+  "HOGS",
+  "HOLD",
+  "HOLE",
+  "HOLM",
+  "HOLT",
+  "HOLY",
+  "HOME",
+  "HONE",
+  "HONG",
+  "HONK",
+  "HOOD",
+  "HOOF",
+  "HOOK",
+  "HOOP",
+  "HOOT",
+  "HOPE",
+  "HOPS",
+  "HORN",
+  "HOSE",
+  "HOST",
+  "HOTS",
+  "HOUR",
+  "HOWE",
+  "HOWL",
+  "HUCK",
+  "HUFF",
+  "HUGE",
+  "HUGS",
+  "HULA",
+  "HULK",
+  "HULL",
+  "HUMP",
+  "HUMS",
+  "HUNG",
+  "HUNK",
+  "HUNS",
+  "HUNT",
+  "HURL",
+  "HURT",
+  "HUSH",
+  "HUTS",
+  "HWAN",
+  "HYMN",
+  "HYPE",
+  "IBEX",
+  "ICED",
+  "ICKY",
+  "ICON",
+  "IDEA",
+  "IDLE",
+  "IDLY",
+  "IDOL",
+  "IFFY",
+  "IMAM",
+  "INCH",
+  "INFO",
+  "INNS",
+  "INTO",
+  "IRIS",
+  "IRON",
+  "ISLE",
+  "ITCH",
+  "ITEM",
+  "JACK",
+  "JADE",
+  "JAIL",
+  "JAKE",
+  "JAMS",
+  "JANE",
+  "JARS",
+  "JAVA",
+  "JAWS",
+  "JAZZ",
+  "JEAN",
+  "JEEP",
+  "JEEZ",
+  "JEFE",
+  "JESS",
+  "JEST",
+  "JETS",
+  "JEWS",
+  "JILL",
+  "JINN",
+  "JINX",
+  "JIVE",
+  "JOBS",
+  "JOCK",
+  "JOES",
+  "JOEY",
+  "JOHN",
+  "JOIN",
+  "JOKE",
+  "JOLT",
+  "JOSH",
+  "JOSS",
+  "JOYS",
+  "JUDO",
+  "JUGS",
+  "JUJU",
+  "JUMP",
+  "JUNK",
+  "JURY",
+  "JUST",
+  "KALE",
+  "KANA",
+  "KANE",
+  "KAYO",
+  "KEEL",
+  "KEEN",
+  "KEEP",
+  "KEGS",
+  "KELP",
+  "KEMP",
+  "KENO",
+  "KENT",
+  "KEPT",
+  "KERN",
+  "KEYS",
+  "KHAN",
+  "KICK",
+  "KIDS",
+  "KILL",
+  "KILO",
+  "KILT",
+  "KIND",
+  "KING",
+  "KIRK",
+  "KISS",
+  "KITE",
+  "KITS",
+  "KIWI",
+  "KNEE",
+  "KNEW",
+  "KNIT",
+  "KNOB",
+  "KNOT",
+  "KNOW",
+  "KOHL",
+  "KOOK",
+  "KOTO",
+  "KRIS",
+  "KUDO",
+  "LABS",
+  "LACE",
+  "LACK",
+  "LACY",
+  "LADS",
+  "LADY",
+  "LAID",
+  "LAIN",
+  "LAIR",
+  "LAKE",
+  "LAKH",
+  "LAMA",
+  "LAMB",
+  "LAME",
+  "LAMP",
+  "LAND",
+  "LANE",
+  "LANG",
+  "LAPS",
+  "LARD",
+  "LARK",
+  "LARS",
+  "LASH",
+  "LASS",
+  "LAST",
+  "LATE",
+  "LAVA",
+  "LAWN",
+  "LAWS",
+  "LAYS",
+  "LAZY",
+  "LEAD",
+  "LEAF",
+  "LEAK",
+  "LEAN",
+  "LEAP",
+  "LEAR",
+  "LEFT",
+  "LEGS",
+  "LEND",
+  "LENO",
+  "LENS",
+  "LENT",
+  "LESS",
+  "LEST",
+  "LETS",
+  "LEVY",
+  "LEWD",
+  "LIAR",
+  "LIBS",
+  "LICE",
+  "LICK",
+  "LIDO",
+  "LIDS",
+  "LIED",
+  "LIEN",
+  "LIES",
+  "LIEU",
+  "LIFE",
+  "LIFT",
+  "LIKE",
+  "LILY",
+  "LIMA",
+  "LIMB",
+  "LIME",
+  "LIMO",
+  "LIMP",
+  "LINE",
+  "LING",
+  "LINK",
+  "LINO",
+  "LINT",
+  "LION",
+  "LIPS",
+  "LIRA",
+  "LIRE",
+  "LIST",
+  "LITE",
+  "LIVE",
+  "LOAD",
+  "LOAF",
+  "LOAN",
+  "LOBE",
+  "LOBO",
+  "LOCH",
+  "LOCK",
+  "LOCO",
+  "LODE",
+  "LOFT",
+  "LOGO",
+  "LOGS",
+  "LOIN",
+  "LONE",
+  "LONG",
+  "LOOK",
+  "LOOM",
+  "LOON",
+  "LOOP",
+  "LOOT",
+  "LORD",
+  "LORE",
+  "LOSE",
+  "LOSS",
+  "LOST",
+  "LOTS",
+  "LOUD",
+  "LOUT",
+  "LOVE",
+  "LOWE",
+  "LOWS",
+  "LUAU",
+  "LUCE",
+  "LUCK",
+  "LULL",
+  "LULU",
+  "LUMP",
+  "LUNA",
+  "LUNG",
+  "LURE",
+  "LURK",
+  "LUSH",
+  "LUST",
+  "LUTE",
+  "LUTZ",
+  "LYNX",
+  "MACE",
+  "MACH",
+  "MACK",
+  "MADE",
+  "MADS",
+  "MAGS",
+  "MAID",
+  "MAIL",
+  "MAIN",
+  "MAKE",
+  "MAKO",
+  "MALE",
+  "MALL",
+  "MALT",
+  "MAMA",
+  "MANA",
+  "MANE",
+  "MANO",
+  "MANS",
+  "MANY",
+  "MAPS",
+  "MARC",
+  "MARE",
+  "MARK",
+  "MARS",
+  "MART",
+  "MASH",
+  "MASK",
+  "MASS",
+  "MAST",
+  "MATE",
+  "MATH",
+  "MATS",
+  "MATT",
+  "MAUD",
+  "MAXI",
+  "MAYA",
+  "MAYO",
+  "MAYS",
+  "MAZE",
+  "MEAD",
+  "MEAL",
+  "MEAN",
+  "MEAT",
+  "MEEK",
+  "MEET",
+  "MELT",
+  "MEMO",
+  "MEND",
+  "MENU",
+  "MEOW",
+  "MERE",
+  "MESA",
+  "MESH",
+  "MESS",
+  "META",
+  "METH",
+  "MICE",
+  "MIDI",
+  "MIKE",
+  "MILD",
+  "MILE",
+  "MILK",
+  "MILL",
+  "MILO",
+  "MILT",
+  "MIME",
+  "MINA",
+  "MIND",
+  "MINE",
+  "MINI",
+  "MINK",
+  "MINT",
+  "MINX",
+  "MIRE",
+  "MISO",
+  "MISS",
+  "MIST",
+  "MITE",
+  "MITT",
+  "MOAN",
+  "MOAT",
+  "MOCK",
+  "MODE",
+  "MODS",
+  "MOJO",
+  "MOLD",
+  "MOLE",
+  "MOLL",
+  "MOLY",
+  "MOMS",
+  "MONK",
+  "MONO",
+  "MOOD",
+  "MOON",
+  "MOOR",
+  "MOOT",
+  "MOPE",
+  "MORE",
+  "MORN",
+  "MORT",
+  "MOSS",
+  "MOST",
+  "MOTH",
+  "MOTT",
+  "MOVE",
+  "MUCH",
+  "MUCK",
+  "MUGS",
+  "MULE",
+  "MUMS",
+  "MUSE",
+  "MUSH",
+  "MUSK",
+  "MUST",
+  "MUTE",
+  "MUTT",
+  "MYTH",
+  "NADA",
+  "NAIL",
+  "NAME",
+  "NANA",
+  "NAPS",
+  "NARC",
+  "NAVY",
+  "NEAR",
+  "NEAT",
+  "NECK",
+  "NEED",
+  "NEON",
+  "NERD",
+  "NESS",
+  "NEST",
+  "NETS",
+  "NEWS",
+  "NEWT",
+  "NEXT",
+  "NICE",
+  "NICK",
+  "NIGH",
+  "NILS",
+  "NINE",
+  "NODE",
+  "NOEL",
+  "NOIR",
+  "NOME",
+  "NONA",
+  "NONE",
+  "NOOK",
+  "NOON",
+  "NOPE",
+  "NORM",
+  "NOSE",
+  "NOSY",
+  "NOTE",
+  "NOUS",
+  "NOVA",
+  "NOWT",
+  "NUDE",
+  "NUKE",
+  "NULL",
+  "NUMB",
+  "NUNS",
+  "NUTS",
+  "OAKS",
+  "OARS",
+  "OATH",
+  "OATS",
+  "OBEY",
+  "ODDS",
+  "ODOR",
+  "OGRE",
+  "OILS",
+  "OILY",
+  "OINK",
+  "OKAY",
+  "OLDS",
+  "OMEN",
+  "OMER",
+  "ONCE",
+  "ONES",
+  "ONLY",
+  "ONTO",
+  "ONYX",
+  "OOPS",
+  "OOZE",
+  "OPAL",
+  "OPEN",
+  "OPUS",
+  "ORAL",
+  "ORGY",
+  "ORYX",
+  "OTTO",
+  "OUCH",
+  "OURS",
+  "OUTS",
+  "OVAL",
+  "OVEN",
+  "OVER",
+  "OWED",
+  "OWES",
+  "OWLS",
+  "OWNS",
+  "OXEN",
+  "PACE",
+  "PACK",
+  "PACT",
+  "PADS",
+  "PAGE",
+  "PAID",
+  "PAIL",
+  "PAIN",
+  "PAIR",
+  "PALE",
+  "PALM",
+  "PALS",
+  "PANE",
+  "PANG",
+  "PANS",
+  "PANT",
+  "PAPA",
+  "PARA",
+  "PARK",
+  "PART",
+  "PASS",
+  "PAST",
+  "PATE",
+  "PATH",
+  "PATS",
+  "PAVE",
+  "PAWN",
+  "PAWS",
+  "PAYS",
+  "PEAK",
+  "PEAR",
+  "PEAS",
+  "PEAT",
+  "PECK",
+  "PEED",
+  "PEEK",
+  "PEEL",
+  "PEEP",
+  "PEER",
+  "PEES",
+  "PEGS",
+  "PELT",
+  "PENS",
+  "PERI",
+  "PERK",
+  "PERM",
+  "PEST",
+  "PETS",
+  "PFFT",
+  "PHEW",
+  "PICK",
+  "PICS",
+  "PIED",
+  "PIER",
+  "PIES",
+  "PIGS",
+  "PIKA",
+  "PIKE",
+  "PILE",
+  "PILL",
+  "PIMP",
+  "PINA",
+  "PINE",
+  "PING",
+  "PINK",
+  "PINS",
+  "PINT",
+  "PIPE",
+  "PITS",
+  "PITY",
+  "PIXY",
+  "PLAN",
+  "PLAY",
+  "PLEA",
+  "PLOP",
+  "PLOT",
+  "PLOW",
+  "PLOY",
+  "PLUG",
+  "PLUM",
+  "PLUS",
+  "PODS",
+  "POEM",
+  "POET",
+  "POKE",
+  "POLE",
+  "POLL",
+  "POLO",
+  "POLY",
+  "POMP",
+  "POND",
+  "PONG",
+  "PONY",
+  "POOF",
+  "POOH",
+  "POOL",
+  "POON",
+  "POOP",
+  "POOR",
+  "POPE",
+  "POPS",
+  "PORK",
+  "PORT",
+  "POSE",
+  "POSH",
+  "POST",
+  "POTS",
+  "POUR",
+  "POUT",
+  "PRAM",
+  "PRAT",
+  "PRAY",
+  "PREP",
+  "PREY",
+  "PROD",
+  "PROF",
+  "PROM",
+  "PROP",
+  "PROS",
+  "PSST",
+  "PUBS",
+  "PUCK",
+  "PUFF",
+  "PUKE",
+  "PULL",
+  "PULP",
+  "PUMA",
+  "PUMP",
+  "PUNK",
+  "PUNS",
+  "PUNT",
+  "PUNY",
+  "PUPS",
+  "PURE",
+  "PURR",
+  "PUSH",
+  "PUSS",
+  "PUTS",
+  "PUTT",
+  "PUTZ",
+  "PYRE",
+  "QUAD",
+  "QUID",
+  "QUIT",
+  "QUIZ",
+  "RACE",
+  "RACK",
+  "RAFT",
+  "RAGE",
+  "RAGS",
+  "RAID",
+  "RAIL",
+  "RAIN",
+  "RAJA",
+  "RAKE",
+  "RAMI",
+  "RAMP",
+  "RAMS",
+  "RAND",
+  "RANG",
+  "RANI",
+  "RANK",
+  "RANT",
+  "RAPS",
+  "RARE",
+  "RASH",
+  "RATE",
+  "RATS",
+  "RAVE",
+  "RAYS",
+  "READ",
+  "REAL",
+  "REAP",
+  "REAR",
+  "REDO",
+  "REDS",
+  "REED",
+  "REEF",
+  "REEK",
+  "REEL",
+  "REIN",
+  "RELY",
+  "RENT",
+  "REPO",
+  "REPS",
+  "REST",
+  "REVS",
+  "RHEA",
+  "RIBS",
+  "RICE",
+  "RICH",
+  "RICK",
+  "RIDE",
+  "RIFF",
+  "RIFT",
+  "RIGS",
+  "RIMS",
+  "RING",
+  "RINK",
+  "RIOT",
+  "RIPE",
+  "RIPS",
+  "RISE",
+  "RISK",
+  "RITE",
+  "RITZ",
+  "ROAD",
+  "ROAM",
+  "ROAN",
+  "ROAR",
+  "ROBE",
+  "ROBS",
+  "ROCK",
+  "RODE",
+  "RODS",
+  "ROLE",
+  "ROLF",
+  "ROLL",
+  "ROOF",
+  "ROOK",
+  "ROOM",
+  "ROOT",
+  "ROPE",
+  "ROSE",
+  "ROSY",
+  "ROTS",
+  "ROWS",
+  "RUBE",
+  "RUBS",
+  "RUBY",
+  "RUDE",
+  "RUFF",
+  "RUGS",
+  "RUIN",
+  "RULE",
+  "RUMP",
+  "RUNE",
+  "RUNG",
+  "RUNS",
+  "RUNT",
+  "RUSE",
+  "RUSH",
+  "RUST",
+  "RUTH",
+  "SACK",
+  "SADE",
+  "SAFE",
+  "SAGA",
+  "SAGE",
+  "SAID",
+  "SAIL",
+  "SAKE",
+  "SAKI",
+  "SALE",
+  "SALT",
+  "SAME",
+  "SAND",
+  "SANE",
+  "SANG",
+  "SANK",
+  "SANS",
+  "SARI",
+  "SARK",
+  "SASH",
+  "SASS",
+  "SAUL",
+  "SAVE",
+  "SAYS",
+  "SCAB",
+  "SCAM",
+  "SCAN",
+  "SCAR",
+  "SCAT",
+  "SCOT",
+  "SCUM",
+  "SEAL",
+  "SEAM",
+  "SEAS",
+  "SEAT",
+  "SECT",
+  "SEED",
+  "SEEK",
+  "SEEM",
+  "SEEN",
+  "SEER",
+  "SEES",
+  "SELF",
+  "SELL",
+  "SEMI",
+  "SEND",
+  "SENT",
+  "SEPT",
+  "SERA",
+  "SETS",
+  "SEWN",
+  "SEXY",
+  "SHAG",
+  "SHAH",
+  "SHAM",
+  "SHAT",
+  "SHAW",
+  "SHAY",
+  "SHEA",
+  "SHED",
+  "SHES",
+  "SHIM",
+  "SHIN",
+  "SHIP",
+  "SHIV",
+  "SHOE",
+  "SHOO",
+  "SHOP",
+  "SHOT",
+  "SHOW",
+  "SHUN",
+  "SHUT",
+  "SICK",
+  "SIDE",
+  "SIGH",
+  "SIGN",
+  "SILK",
+  "SILL",
+  "SILO",
+  "SIMA",
+  "SIMS",
+  "SING",
+  "SINK",
+  "SINS",
+  "SIPS",
+  "SIRE",
+  "SIRS",
+  "SITE",
+  "SITS",
+  "SIZE",
+  "SKID",
+  "SKIM",
+  "SKIN",
+  "SKIP",
+  "SKIS",
+  "SLAB",
+  "SLAG",
+  "SLAM",
+  "SLAP",
+  "SLAY",
+  "SLED",
+  "SLEW",
+  "SLID",
+  "SLIM",
+  "SLIP",
+  "SLIT",
+  "SLOB",
+  "SLOP",
+  "SLOT",
+  "SLOW",
+  "SLUG",
+  "SLUM",
+  "SMOG",
+  "SMUG",
+  "SMUT",
+  "SNAG",
+  "SNAP",
+  "SNIP",
+  "SNOB",
+  "SNOT",
+  "SNOW",
+  "SNUG",
+  "SOAK",
+  "SOAP",
+  "SOAR",
+  "SOBS",
+  "SOCK",
+  "SODA",
+  "SOFA",
+  "SOFT",
+  "SOIL",
+  "SOLD",
+  "SOLE",
+  "SOLO",
+  "SOMA",
+  "SOME",
+  "SONG",
+  "SONS",
+  "SOOK",
+  "SOON",
+  "SOOT",
+  "SOPH",
+  "SORA",
+  "SORE",
+  "SORT",
+  "SOUL",
+  "SOUP",
+  "SOUR",
+  "SOUS",
+  "SOWN",
+  "SPAN",
+  "SPAR",
+  "SPAS",
+  "SPAT",
+  "SPEC",
+  "SPED",
+  "SPEW",
+  "SPIN",
+  "SPIT",
+  "SPOT",
+  "SPUD",
+  "SPUN",
+  "SPUR",
+  "STAB",
+  "STAG",
+  "STAR",
+  "STAT",
+  "STAY",
+  "STEM",
+  "STEP",
+  "STEW",
+  "STIR",
+  "STOP",
+  "STOW",
+  "STUB",
+  "STUD",
+  "STUN",
+  "SUBS",
+  "SUCH",
+  "SUCK",
+  "SUED",
+  "SUIT",
+  "SULK",
+  "SULU",
+  "SUMO",
+  "SUMS",
+  "SUNG",
+  "SUNK",
+  "SUNS",
+  "SURE",
+  "SURF",
+  "SWAB",
+  "SWAG",
+  "SWAM",
+  "SWAN",
+  "SWAP",
+  "SWAT",
+  "SWAY",
+  "SWIG",
+  "SWIM",
+  "SYNC",
+  "SYNE",
+  "TABS",
+  "TACK",
+  "TACO",
+  "TACT",
+  "TAGS",
+  "TAIL",
+  "TAKE",
+  "TALE",
+  "TALK",
+  "TALL",
+  "TAME",
+  "TANG",
+  "TANK",
+  "TAPE",
+  "TAPS",
+  "TARO",
+  "TARP",
+  "TART",
+  "TASK",
+  "TATE",
+  "TAXI",
+  "TEAL",
+  "TEAM",
+  "TEAR",
+  "TEAS",
+  "TEEN",
+  "TELL",
+  "TEMP",
+  "TEND",
+  "TENS",
+  "TENT",
+  "TERM",
+  "TEST",
+  "TEXT",
+  "THAN",
+  "THAT",
+  "THAW",
+  "THEE",
+  "THEM",
+  "THEN",
+  "THEY",
+  "THIN",
+  "THIS",
+  "THOU",
+  "THRU",
+  "THUD",
+  "THUG",
+  "THUS",
+  "TICK",
+  "TIDE",
+  "TIDY",
+  "TIED",
+  "TIER",
+  "TIES",
+  "TIFF",
+  "TIKI",
+  "TILE",
+  "TILL",
+  "TILT",
+  "TIME",
+  "TING",
+  "TINS",
+  "TINY",
+  "TIPS",
+  "TIRE",
+  "TOAD",
+  "TOBY",
+  "TOES",
+  "TOFU",
+  "TOGA",
+  "TOIL",
+  "TOLD",
+  "TOLL",
+  "TOMB",
+  "TOME",
+  "TONE",
+  "TONG",
+  "TONS",
+  "TONY",
+  "TOOK",
+  "TOOL",
+  "TOOT",
+  "TOPS",
+  "TORA",
+  "TORE",
+  "TORI",
+  "TORN",
+  "TORO",
+  "TORY",
+  "TOSH",
+  "TOSS",
+  "TOTE",
+  "TOTS",
+  "TOUR",
+  "TOUT",
+  "TOWN",
+  "TOYS",
+  "TRAM",
+  "TRAP",
+  "TRAY",
+  "TREE",
+  "TREK",
+  "TREY",
+  "TRIM",
+  "TRIO",
+  "TRIP",
+  "TROT",
+  "TROY",
+  "TRUE",
+  "TSAR",
+  "TUBA",
+  "TUBE",
+  "TUBS",
+  "TUCK",
+  "TUNA",
+  "TUNE",
+  "TUNG",
+  "TURF",
+  "TURK",
+  "TURN",
+  "TUSH",
+  "TUSK",
+  "TUTS",
+  "TUTU",
+  "TWAS",
+  "TWIG",
+  "TWIN",
+  "TWIT",
+  "TWOS",
+  "TYPE",
+  "TYRE",
+  "UGLY",
+  "UNDO",
+  "UNIT",
+  "UNTO",
+  "UPON",
+  "URGE",
+  "USED",
+  "USER",
+  "USES",
+  "VAIL",
+  "VAIN",
+  "VALE",
+  "VAMP",
+  "VANE",
+  "VANS",
+  "VARY",
+  "VASE",
+  "VAST",
+  "VEAL",
+  "VEER",
+  "VEIL",
+  "VEIN",
+  "VENT",
+  "VERA",
+  "VERB",
+  "VERY",
+  "VEST",
+  "VETO",
+  "VETS",
+  "VIAL",
+  "VIBE",
+  "VICE",
+  "VIEW",
+  "VILE",
+  "VINE",
+  "VINO",
+  "VISA",
+  "VITA",
+  "VIVA",
+  "VIVE",
+  "VOID",
+  "VOLT",
+  "VOTE",
+  "VOWS",
+  "WACK",
+  "WADE",
+  "WAGE",
+  "WAIL",
+  "WAIT",
+  "WAKE",
+  "WALK",
+  "WALL",
+  "WAND",
+  "WANT",
+  "WARD",
+  "WARE",
+  "WARM",
+  "WARN",
+  "WARP",
+  "WARS",
+  "WART",
+  "WARY",
+  "WASH",
+  "WASP",
+  "WATT",
+  "WAVE",
+  "WAVY",
+  "WAXY",
+  "WAYS",
+  "WEAK",
+  "WEAR",
+  "WEBS",
+  "WEED",
+  "WEEK",
+  "WEEP",
+  "WEIR",
+  "WELD",
+  "WELL",
+  "WENT",
+  "WEPT",
+  "WERE",
+  "WEST",
+  "WHAM",
+  "WHAT",
+  "WHEE",
+  "WHEN",
+  "WHEW",
+  "WHIM",
+  "WHIP",
+  "WHIT",
+  "WHIZ",
+  "WHOA",
+  "WHOM",
+  "WICK",
+  "WIDE",
+  "WIFE",
+  "WIGS",
+  "WILD",
+  "WILL",
+  "WILT",
+  "WILY",
+  "WIMP",
+  "WIND",
+  "WINE",
+  "WING",
+  "WINK",
+  "WINS",
+  "WIPE",
+  "WIRE",
+  "WISE",
+  "WISH",
+  "WITH",
+  "WITS",
+  "WOES",
+  "WOKE",
+  "WOLF",
+  "WOMB",
+  "WONT",
+  "WOOD",
+  "WOOF",
+  "WOOL",
+  "WORD",
+  "WORE",
+  "WORK",
+  "WORM",
+  "WORN",
+  "WRAP",
+  "WREN",
+  "WRIT",
+  "WUSS",
+  "WYNN",
+  "YAMS",
+  "YANG",
+  "YANK",
+  "YARD",
+  "YARN",
+  "YAWN",
+  "YEAH",
+  "YEAR",
+  "YELL",
+  "YELP",
+  "YETI",
+  "YOGA",
+  "YOGI",
+  "YOKE",
+  "YOLK",
+  "YOUR",
+  "YUAN",
+  "YUCK",
+  "ZEAL",
+  "ZERO",
+  "ZEST",
+  "ZETA",
+  "ZINC",
+  "ZING",
+  "ZIPS",
+  "ZONE",
+  "ZOOM",
+  "ZOOS",
+
+  // === 5-letter words ===
+  "ABBEY",
+  "ABBOT",
+  "ABIDE",
+  "ABORT",
+  "ABOUT",
+  "ABOVE",
+  "ABUSE",
+  "ABYSS",
+  "ACHES",
+  "ACIDS",
+  "ACRES",
+  "ACTED",
+  "ACTOR",
+  "ACUTE",
+  "ADAPT",
+  "ADDED",
+  "ADIEU",
+  "ADIOS",
+  "ADMIT",
+  "ADOBE",
+  "ADOPT",
+  "ADORE",
+  "ADULT",
+  "AFTER",
+  "AGAIN",
+  "AGENT",
+  "AGING",
+  "AGONY",
+  "AGREE",
+  "AHEAD",
+  "AHOLD",
+  "AIMED",
+  "AISLE",
+  "ALARM",
+  "ALBUM",
+  "ALERT",
+  "ALIAS",
+  "ALIBI",
+  "ALIEN",
+  "ALIGN",
+  "ALIKE",
+  "ALIVE",
+  "ALLEY",
+  "ALLOW",
+  "ALLOY",
+  "ALONE",
+  "ALONG",
+  "ALOUD",
+  "ALPHA",
+  "ALTAR",
+  "ALTER",
+  "AMBER",
+  "AMEND",
+  "AMIGO",
+  "AMINO",
+  "AMONG",
+  "AMUSE",
+  "ANGEL",
+  "ANGER",
+  "ANGLE",
+  "ANGRY",
+  "ANIME",
+  "ANKLE",
+  "ANNEX",
+  "ANNOY",
+  "APART",
+  "APPLE",
+  "APPLY",
+  "APRON",
+  "ARBOR",
+  "AREAS",
+  "ARENA",
+  "ARGUE",
+  "ARIEL",
+  "ARISE",
+  "ARMED",
+  "ARMOR",
+  "ARRAY",
+  "ARROW",
+  "ARSON",
+  "ASHES",
+  "ASIDE",
+  "ASKED",
+  "ASSET",
+  "ATLAS",
+  "ATOMS",
+  "ATTIC",
+  "AUDIO",
+  "AUDIT",
+  "AUNTS",
+  "AUNTY",
+  "AUTOS",
+  "AVOID",
+  "AWAIT",
+  "AWAKE",
+  "AWARD",
+  "AWARE",
+  "AWFUL",
+  "BABES",
+  "BACKS",
+  "BACON",
+  "BADGE",
+  "BADLY",
+  "BAGEL",
+  "BAKED",
+  "BAKER",
+  "BALLS",
+  "BANDS",
+  "BANGS",
+  "BANJO",
+  "BANKS",
+  "BARGE",
+  "BARKS",
+  "BARON",
+  "BASED",
+  "BASES",
+  "BASIC",
+  "BASIL",
+  "BASIN",
+  "BASIS",
+  "BATCH",
+  "BATES",
+  "BATHE",
+  "BATHS",
+  "BATON",
+  "BEACH",
+  "BEADS",
+  "BEAMS",
+  "BEANS",
+  "BEARD",
+  "BEARS",
+  "BEAST",
+  "BEATS",
+  "BEEPS",
+  "BEERS",
+  "BEGAN",
+  "BEGIN",
+  "BEGUN",
+  "BEING",
+  "BELLE",
+  "BELLS",
+  "BELLY",
+  "BELOW",
+  "BELTS",
+  "BENCH",
+  "BENNY",
+  "BERRY",
+  "BIBLE",
+  "BIKER",
+  "BIKES",
+  "BILLS",
+  "BILLY",
+  "BINGO",
+  "BIRDS",
+  "BIRTH",
+  "BITES",
+  "BLACK",
+  "BLADE",
+  "BLAME",
+  "BLANK",
+  "BLAST",
+  "BLAZE",
+  "BLEAK",
+  "BLEED",
+  "BLEEP",
+  "BLEND",
+  "BLESS",
+  "BLIND",
+  "BLINK",
+  "BLISS",
+  "BLOCK",
+  "BLOKE",
+  "BLOND",
+  "BLOOD",
+  "BLOOM",
+  "BLOWN",
+  "BLOWS",
+  "BLUES",
+  "BLUFF",
+  "BLUNT",
+  "BLUSH",
+  "BOARD",
+  "BOATS",
+  "BOBBY",
+  "BOGUS",
+  "BOILS",
+  "BOLTS",
+  "BOMBS",
+  "BONDS",
+  "BONER",
+  "BONES",
+  "BONUS",
+  "BOOBY",
+  "BOOKS",
+  "BOOST",
+  "BOOTH",
+  "BOOTS",
+  "BOOTY",
+  "BOOZE",
+  "BORED",
+  "BOSOM",
+  "BOUND",
+  "BOWEL",
+  "BOWLS",
+  "BOXED",
+  "BOXER",
+  "BOXES",
+  "BRACE",
+  "BRAIN",
+  "BRAKE",
+  "BRAND",
+  "BRASS",
+  "BRATS",
+  "BRAVE",
+  "BRAVO",
+  "BREAD",
+  "BREAK",
+  "BREED",
+  "BRENT",
+  "BRIBE",
+  "BRICK",
+  "BRIDE",
+  "BRIEF",
+  "BRING",
+  "BRINK",
+  "BROAD",
+  "BROCK",
+  "BROKE",
+  "BROOK",
+  "BROOM",
+  "BROTH",
+  "BROWN",
+  "BRUSH",
+  "BRUTE",
+  "BUCKS",
+  "BUDDY",
+  "BUDGE",
+  "BUFFY",
+  "BUGGY",
+  "BUGLE",
+  "BUILD",
+  "BUILT",
+  "BULBS",
+  "BULLS",
+  "BULLY",
+  "BUMPS",
+  "BUMPY",
+  "BUNCH",
+  "BUNNY",
+  "BURKE",
+  "BURNS",
+  "BURNT",
+  "BURST",
+  "BUSES",
+  "BUTCH",
+  "BUTTS",
+  "BUYER",
+  "BYTES",
+  "CABIN",
+  "CABLE",
+  "CACHE",
+  "CADET",
+  "CAGES",
+  "CAKES",
+  "CALLS",
+  "CAMEL",
+  "CAMPS",
+  "CANAL",
+  "CANDY",
+  "CANOE",
+  "CANON",
+  "CARDS",
+  "CARED",
+  "CARES",
+  "CARGO",
+  "CAROL",
+  "CARRY",
+  "CARVE",
+  "CASES",
+  "CASTE",
+  "CATCH",
+  "CAUSE",
+  "CAVES",
+  "CEASE",
+  "CEDAR",
+  "CELLO",
+  "CELLS",
+  "CENTS",
+  "CHAIN",
+  "CHAIR",
+  "CHALK",
+  "CHAMP",
+  "CHANG",
+  "CHANT",
+  "CHAOS",
+  "CHAPS",
+  "CHARM",
+  "CHART",
+  "CHASE",
+  "CHEAP",
+  "CHEAT",
+  "CHECK",
+  "CHEEK",
+  "CHEER",
+  "CHEFS",
+  "CHEMO",
+  "CHESS",
+  "CHEST",
+  "CHEVY",
+  "CHICK",
+  "CHICO",
+  "CHIEF",
+  "CHILD",
+  "CHILE",
+  "CHILI",
+  "CHILL",
+  "CHIME",
+  "CHIMP",
+  "CHINA",
+  "CHIPS",
+  "CHOIR",
+  "CHOKE",
+  "CHOPS",
+  "CHORD",
+  "CHOSE",
+  "CHUCK",
+  "CHUMP",
+  "CHUNK",
+  "CHUTE",
+  "CIGAR",
+  "CISCO",
+  "CITED",
+  "CIVIC",
+  "CIVIL",
+  "CLAIM",
+  "CLAMP",
+  "CLAMS",
+  "CLASH",
+  "CLASS",
+  "CLAWS",
+  "CLEAN",
+  "CLEAR",
+  "CLERK",
+  "CLICK",
+  "CLIFF",
+  "CLIMB",
+  "CLING",
+  "CLINK",
+  "CLIPS",
+  "CLOAK",
+  "CLOCK",
+  "CLONE",
+  "CLOSE",
+  "CLOTH",
+  "CLOUD",
+  "CLOWN",
+  "CLUBS",
+  "CLUES",
+  "COACH",
+  "COAST",
+  "COATS",
+  "COBRA",
+  "COCKY",
+  "COCOA",
+  "CODES",
+  "COINS",
+  "COLIN",
+  "COLON",
+  "COLOR",
+  "COMBO",
+  "COMES",
+  "COMET",
+  "COMFY",
+  "COMIC",
+  "CONDO",
+  "CONGO",
+  "COOKS",
+  "CORAL",
+  "CORNY",
+  "CORPS",
+  "COSTA",
+  "COSTS",
+  "COUCH",
+  "COUGH",
+  "COULD",
+  "COUNT",
+  "COURT",
+  "COVER",
+  "CRABS",
+  "CRACK",
+  "CRAFT",
+  "CRAMP",
+  "CRANE",
+  "CRANK",
+  "CRAPS",
+  "CRASH",
+  "CRATE",
+  "CRAVE",
+  "CRAWL",
+  "CRAZY",
+  "CREAM",
+  "CREED",
+  "CREEK",
+  "CREEP",
+  "CREST",
+  "CREWS",
+  "CRIED",
+  "CRIES",
+  "CRIME",
+  "CRISP",
+  "CROOK",
+  "CROPS",
+  "CROSS",
+  "CROWD",
+  "CROWN",
+  "CROWS",
+  "CRUDE",
+  "CRUEL",
+  "CRUSH",
+  "CRUST",
+  "CRYPT",
+  "CUBES",
+  "CUBIC",
+  "CUFFS",
+  "CUPID",
+  "CURED",
+  "CURLY",
+  "CURRY",
+  "CURSE",
+  "CURVE",
+  "CUTIE",
+  "CYCLE",
+  "DADDY",
+  "DAILY",
+  "DAIRY",
+  "DAISY",
+  "DANCE",
+  "DANDY",
+  "DARED",
+  "DARES",
+  "DARTS",
+  "DATED",
+  "DATES",
+  "DEALS",
+  "DEALT",
+  "DEATH",
+  "DEBTS",
+  "DEBUG",
+  "DEBUT",
+  "DECAY",
+  "DECKS",
+  "DECOR",
+  "DECOY",
+  "DEEDS",
+  "DELAY",
+  "DELTA",
+  "DEMON",
+  "DENSE",
+  "DEPOT",
+  "DEPTH",
+  "DERBY",
+  "DEVEL",
+  "DEVIL",
+  "DEVON",
+  "DIARY",
+  "DIGIT",
+  "DINER",
+  "DINGS",
+  "DIRTY",
+  "DISCO",
+  "DISCS",
+  "DISKS",
+  "DITCH",
+  "DIVER",
+  "DIZZY",
+  "DOCKS",
+  "DODGE",
+  "DODGY",
+  "DOGGY",
+  "DOING",
+  "DOLLS",
+  "DOLLY",
+  "DONNA",
+  "DONOR",
+  "DONUT",
+  "DOORS",
+  "DOUBT",
+  "DOUGH",
+  "DOWNS",
+  "DOWRY",
+  "DOZEN",
+  "DRAFT",
+  "DRAIN",
+  "DRAKE",
+  "DRAMA",
+  "DRANK",
+  "DRAWN",
+  "DRAWS",
+  "DREAD",
+  "DREAM",
+  "DRESS",
+  "DRIED",
+  "DRIFT",
+  "DRILL",
+  "DRINK",
+  "DRIVE",
+  "DRONE",
+  "DROPS",
+  "DROVE",
+  "DROWN",
+  "DRUGS",
+  "DRUMS",
+  "DRUNK",
+  "DRYER",
+  "DUCKS",
+  "DUCKY",
+  "DUDES",
+  "DUMMY",
+  "DUMPS",
+  "DUSTY",
+  "DUTCH",
+  "DWARF",
+  "DWELL",
+  "DYING",
+  "EAGER",
+  "EAGLE",
+  "EARLY",
+  "EARNS",
+  "EARTH",
+  "EATEN",
+  "EATER",
+  "EBONY",
+  "EDGES",
+  "EERIE",
+  "EIGHT",
+  "ELBOW",
+  "ELDER",
+  "ELECT",
+  "ELITE",
+  "ELOPE",
+  "ELVES",
+  "EMAIL",
+  "EMOJI",
+  "EMPTY",
+  "ENDED",
+  "ENEMY",
+  "ENJOY",
+  "ENTER",
+  "ENTRY",
+  "EQUAL",
+  "ERASE",
+  "ERICA",
+  "ERROR",
+  "ESSAY",
+  "EUROS",
+  "EVENT",
+  "EVERY",
+  "EXACT",
+  "EXAMS",
+  "EXCEL",
+  "EXILE",
+  "EXIST",
+  "EXITS",
+  "EXPEL",
+  "EXTRA",
+  "FACED",
+  "FACES",
+  "FACTS",
+  "FADED",
+  "FADES",
+  "FAILS",
+  "FAINT",
+  "FAIRY",
+  "FAITH",
+  "FAKED",
+  "FALLS",
+  "FALSE",
+  "FANCY",
+  "FANGS",
+  "FANNY",
+  "FARCE",
+  "FARES",
+  "FARMS",
+  "FATAL",
+  "FATSO",
+  "FATTY",
+  "FAULT",
+  "FAVOR",
+  "FEARS",
+  "FEAST",
+  "FEEDS",
+  "FEELS",
+  "FELLA",
+  "FELON",
+  "FENCE",
+  "FERRY",
+  "FETCH",
+  "FETUS",
+  "FEVER",
+  "FEWER",
+  "FIBER",
+  "FIBRE",
+  "FIELD",
+  "FIEND",
+  "FIERY",
+  "FIFTH",
+  "FIFTY",
+  "FIGHT",
+  "FILED",
+  "FILES",
+  "FILLS",
+  "FILMS",
+  "FILTH",
+  "FINAL",
+  "FINCH",
+  "FINDS",
+  "FINER",
+  "FIRED",
+  "FIRES",
+  "FIRMS",
+  "FIRST",
+  "FISHY",
+  "FISTS",
+  "FIXED",
+  "FIXES",
+  "FJORD",
+  "FLAGS",
+  "FLAME",
+  "FLANK",
+  "FLARE",
+  "FLASH",
+  "FLATS",
+  "FLAWS",
+  "FLEAS",
+  "FLEET",
+  "FLESH",
+  "FLICK",
+  "FLIES",
+  "FLING",
+  "FLINT",
+  "FLIRT",
+  "FLOAT",
+  "FLOCK",
+  "FLOOD",
+  "FLOOR",
+  "FLORA",
+  "FLOUR",
+  "FLOWN",
+  "FLOWS",
+  "FLUID",
+  "FLUSH",
+  "FLUTE",
+  "FLYER",
+  "FOCAL",
+  "FOCUS",
+  "FOLKS",
+  "FOLLY",
+  "FONTS",
+  "FOODS",
+  "FOOLS",
+  "FORCE",
+  "FORGE",
+  "FORMS",
+  "FORTH",
+  "FORTY",
+  "FORUM",
+  "FOUND",
+  "FOURS",
+  "FRAME",
+  "FRANK",
+  "FRAUD",
+  "FREAK",
+  "FREED",
+  "FRESH",
+  "FRIED",
+  "FRIES",
+  "FRITZ",
+  "FROGS",
+  "FRONT",
+  "FROST",
+  "FROWN",
+  "FROZE",
+  "FRUIT",
+  "FUDGE",
+  "FULLY",
+  "FUMES",
+  "FUNDS",
+  "FUNKY",
+  "FUNNY",
+  "FURRY",
+  "FUZZY",
+  "GABBY",
+  "GAINS",
+  "GAMES",
+  "GAMMA",
+  "GANGS",
+  "GARTH",
+  "GASES",
+  "GASPS",
+  "GATES",
+  "GATOR",
+  "GAUGE",
+  "GAVEL",
+  "GEARS",
+  "GEESE",
+  "GEMMA",
+  "GENES",
+  "GENIE",
+  "GENRE",
+  "GENTS",
+  "GERMS",
+  "GHOST",
+  "GIANT",
+  "GIDDY",
+  "GIFTS",
+  "GIMME",
+  "GINNY",
+  "GIRLS",
+  "GIVEN",
+  "GIVES",
+  "GLASS",
+  "GLOBE",
+  "GLORY",
+  "GLOVE",
+  "GLUED",
+  "GLYPH",
+  "GNOME",
+  "GOALS",
+  "GOATS",
+  "GOING",
+  "GOLLY",
+  "GOODS",
+  "GOODY",
+  "GOOFY",
+  "GOONS",
+  "GOOSE",
+  "GRABS",
+  "GRACE",
+  "GRADE",
+  "GRAIL",
+  "GRAIN",
+  "GRAMS",
+  "GRAND",
+  "GRANT",
+  "GRAPE",
+  "GRAPH",
+  "GRASP",
+  "GRASS",
+  "GRAVE",
+  "GRAVY",
+  "GREAT",
+  "GREED",
+  "GREEK",
+  "GREEN",
+  "GREET",
+  "GRIEF",
+  "GRILL",
+  "GRIND",
+  "GROAN",
+  "GROOM",
+  "GROSS",
+  "GROUP",
+  "GROVE",
+  "GROWL",
+  "GROWN",
+  "GROWS",
+  "GRUNT",
+  "GUARD",
+  "GUESS",
+  "GUEST",
+  "GUIDE",
+  "GUILD",
+  "GUILT",
+  "HABIT",
+  "HADES",
+  "HAIRS",
+  "HAIRY",
+  "HALLO",
+  "HALLS",
+  "HANDS",
+  "HANDY",
+  "HANGS",
+  "HAPPY",
+  "HARDY",
+  "HARRY",
+  "HARSH",
+  "HASTE",
+  "HASTY",
+  "HATCH",
+  "HATED",
+  "HATES",
+  "HAUNT",
+  "HAVEN",
+  "HAVOC",
+  "HAWKS",
+  "HAZEL",
+  "HEADS",
+  "HEARD",
+  "HEARS",
+  "HEART",
+  "HEATH",
+  "HEAVE",
+  "HEAVY",
+  "HEDGE",
+  "HEELS",
+  "HEIST",
+  "HELLO",
+  "HELPS",
+  "HENCE",
+  "HENRY",
+  "HERBS",
+  "HICKS",
+  "HIDES",
+  "HIGHS",
+  "HILLS",
+  "HINTS",
+  "HIRED",
+  "HITCH",
+  "HOBBY",
+  "HOGAN",
+  "HOLDS",
+  "HOLED",
+  "HOLES",
+  "HOLLY",
+  "HOMER",
+  "HOMES",
+  "HOMEY",
+  "HONDA",
+  "HONEY",
+  "HONKS",
+  "HONOR",
+  "HOOKS",
+  "HOOPS",
+  "HOPED",
+  "HOPES",
+  "HORNS",
+  "HORNY",
+  "HORSE",
+  "HOSTS",
+  "HOTEL",
+  "HOUND",
+  "HOURS",
+  "HOUSE",
+  "HOWDY",
+  "HOWLS",
+  "HUBBY",
+  "HUMAN",
+  "HUMOR",
+  "HUNCH",
+  "HURRY",
+  "HURTS",
+  "HUTCH",
+  "HYDRA",
+  "ICONS",
+  "IDEAL",
+  "IDEAS",
+  "IDIOT",
+  "IMAGE",
+  "IMPLY",
+  "INDEX",
+  "INDIE",
+  "INNER",
+  "INPUT",
+  "INTER",
+  "INTRO",
+  "IRONY",
+  "ISSUE",
+  "ITCHY",
+  "ITEMS",
+  "IVORY",
+  "JACKS",
+  "JAPAN",
+  "JEANS",
+  "JELLY",
+  "JENNY",
+  "JERKS",
+  "JERRY",
+  "JESSE",
+  "JEWEL",
+  "JIFFY",
+  "JIMMY",
+  "JOHNS",
+  "JOINS",
+  "JOINT",
+  "JOKER",
+  "JOKES",
+  "JOLLY",
+  "JONES",
+  "JUDAS",
+  "JUDGE",
+  "JUICE",
+  "JUICY",
+  "JUMBO",
+  "JUMPS",
+  "JUMPY",
+  "JUROR",
+  "KAPPA",
+  "KARMA",
+  "KAYAK",
+  "KEEPS",
+  "KELLY",
+  "KERRY",
+  "KICKS",
+  "KIDDO",
+  "KILLS",
+  "KILOS",
+  "KINDS",
+  "KINGS",
+  "KINKY",
+  "KITTY",
+  "KNACK",
+  "KNEEL",
+  "KNEES",
+  "KNIFE",
+  "KNOCK",
+  "KNOTS",
+  "KNOWN",
+  "KNOWS",
+  "LABEL",
+  "LABOR",
+  "LACEY",
+  "LACKS",
+  "LADEN",
+  "LAKES",
+  "LAKHS",
+  "LAMPS",
+  "LANCE",
+  "LANDS",
+  "LANES",
+  "LARGE",
+  "LASER",
+  "LASTS",
+  "LATCH",
+  "LATER",
+  "LATEX",
+  "LATTE",
+  "LAUGH",
+  "LAURA",
+  "LAYER",
+  "LEADS",
+  "LEAKS",
+  "LEARN",
+  "LEASE",
+  "LEASH",
+  "LEAST",
+  "LEAVE",
+  "LEDGE",
+  "LEFTY",
+  "LEGAL",
+  "LEGIT",
+  "LEMON",
+  "LEONE",
+  "LEVEL",
+  "LEVER",
+  "LEWIS",
+  "LIANG",
+  "LIARS",
+  "LIFTS",
+  "LIGHT",
+  "LIKED",
+  "LIKES",
+  "LIMBS",
+  "LIMIT",
+  "LINED",
+  "LINEN",
+  "LINES",
+  "LINKS",
+  "LIONS",
+  "LISTS",
+  "LIVED",
+  "LIVER",
+  "LIVES",
+  "LOADS",
+  "LOANS",
+  "LOBBY",
+  "LOCAL",
+  "LOCKS",
+  "LODGE",
+  "LOGAN",
+  "LOGIC",
+  "LOGOS",
+  "LONER",
+  "LOOKS",
+  "LOONY",
+  "LOOPS",
+  "LOOSE",
+  "LORDS",
+  "LORRY",
+  "LOSER",
+  "LOSES",
+  "LOTUS",
+  "LOUIE",
+  "LOUIS",
+  "LOUSY",
+  "LOVED",
+  "LOVER",
+  "LOVES",
+  "LOWER",
+  "LOWLY",
+  "LOYAL",
+  "LUCKY",
+  "LUNAR",
+  "LUNCH",
+  "LUNGS",
+  "LUPIN",
+  "LURED",
+  "LYING",
+  "LYMPH",
+  "LYNCH",
+  "LYRIC",
+  "MACHO",
+  "MACRO",
+  "MADAM",
+  "MADLY",
+  "MAFIA",
+  "MAGIC",
+  "MAIDS",
+  "MAILS",
+  "MAJOR",
+  "MAKER",
+  "MAKES",
+  "MALES",
+  "MAMBO",
+  "MAMMA",
+  "MANGO",
+  "MANIC",
+  "MANLY",
+  "MANOR",
+  "MAPLE",
+  "MARCH",
+  "MARGE",
+  "MARIA",
+  "MARKS",
+  "MARRY",
+  "MARSH",
+  "MASKS",
+  "MASON",
+  "MATCH",
+  "MATES",
+  "MATHS",
+  "MAXIM",
+  "MAYBE",
+  "MAYOR",
+  "MEALS",
+  "MEANS",
+  "MEANT",
+  "MEDAL",
+  "MEDIA",
+  "MEDIC",
+  "MEETS",
+  "MELON",
+  "MELTS",
+  "MENUS",
+  "MEOWS",
+  "MERCY",
+  "MERGE",
+  "MERIT",
+  "MERRY",
+  "MESSY",
+  "METAL",
+  "METER",
+  "METRO",
+  "MICRO",
+  "MIDST",
+  "MIGHT",
+  "MILES",
+  "MILKY",
+  "MILLS",
+  "MINDS",
+  "MINER",
+  "MINES",
+  "MINOR",
+  "MINUS",
+  "MISSY",
+  "MISTY",
+  "MIXED",
+  "MIXER",
+  "MOANS",
+  "MODEL",
+  "MODEM",
+  "MODES",
+  "MOIRA",
+  "MOIST",
+  "MOLLY",
+  "MOMMA",
+  "MOMMY",
+  "MONEY",
+  "MONKS",
+  "MONTE",
+  "MONTH",
+  "MOODY",
+  "MOONS",
+  "MOOSE",
+  "MORAL",
+  "MORON",
+  "MORSE",
+  "MOTEL",
+  "MOTOR",
+  "MOTTO",
+  "MOUND",
+  "MOUNT",
+  "MOURN",
+  "MOUSE",
+  "MOUTH",
+  "MOVED",
+  "MOVES",
+  "MOVIE",
+  "MUDDY",
+  "MUMMY",
+  "MUNCH",
+  "MUSIC",
+  "MYTHS",
+  "NAILS",
+  "NAIVE",
+  "NAKED",
+  "NAMED",
+  "NAMES",
+  "NANCY",
+  "NANNY",
+  "NASTY",
+  "NAVAL",
+  "NECKS",
+  "NEEDS",
+  "NEEDY",
+  "NELLY",
+  "NERDS",
+  "NERVE",
+  "NEVER",
+  "NEWER",
+  "NEWLY",
+  "NICER",
+  "NIECE",
+  "NIGHT",
+  "NINJA",
+  "NINTH",
+  "NOBLE",
+  "NODES",
+  "NOISE",
+  "NOISY",
+  "NOOSE",
+  "NORTH",
+  "NOSES",
+  "NOTCH",
+  "NOTED",
+  "NOTES",
+  "NOVEL",
+  "NURSE",
+  "NYLON",
+  "NYMPH",
+  "OASIS",
+  "OCCUR",
+  "OCEAN",
+  "ODDLY",
+  "OFFER",
+  "OFTEN",
+  "OLDER",
+  "OLIVE",
+  "OMEGA",
+  "ONION",
+  "OPENS",
+  "OPERA",
+  "OPIUM",
+  "ORBIT",
+  "ORDER",
+  "ORGAN",
+  "OTHER",
+  "OUGHT",
+  "OUNCE",
+  "OUTER",
+  "OWNED",
+  "OWNER",
+  "OXIDE",
+  "OZONE",
+  "PACKS",
+  "PADDY",
+  "PADRE",
+  "PAGAN",
+  "PAGER",
+  "PAGES",
+  "PAINS",
+  "PAINT",
+  "PAIRS",
+  "PALMS",
+  "PANDA",
+  "PANEL",
+  "PANIC",
+  "PANTS",
+  "PAPER",
+  "PARIS",
+  "PARKS",
+  "PARTS",
+  "PARTY",
+  "PASHA",
+  "PASTA",
+  "PASTE",
+  "PATCH",
+  "PATHS",
+  "PATIO",
+  "PATSY",
+  "PATTY",
+  "PAUSE",
+  "PEACE",
+  "PEACH",
+  "PEAKS",
+  "PEARL",
+  "PEDAL",
+  "PEDRO",
+  "PEERS",
+  "PENIS",
+  "PENNY",
+  "PERIL",
+  "PERKS",
+  "PERRY",
+  "PESOS",
+  "PETER",
+  "PETTY",
+  "PHASE",
+  "PHONE",
+  "PHONY",
+  "PHOTO",
+  "PIANO",
+  "PICKS",
+  "PICKY",
+  "PIECE",
+  "PIGGY",
+  "PILES",
+  "PILLS",
+  "PILOT",
+  "PINCH",
+  "PINKY",
+  "PIPER",
+  "PIPES",
+  "PITCH",
+  "PIXEL",
+  "PIZZA",
+  "PLACE",
+  "PLAIN",
+  "PLANE",
+  "PLANK",
+  "PLANS",
+  "PLANT",
+  "PLATE",
+  "PLAYS",
+  "PLAZA",
+  "PLEAD",
+  "PLOTS",
+  "PLUCK",
+  "POEMS",
+  "POETS",
+  "POINT",
+  "POKER",
+  "POLAR",
+  "POLES",
+  "POLLS",
+  "POOLS",
+  "POPPY",
+  "PORCH",
+  "PORTS",
+  "POSED",
+  "POSES",
+  "POSSE",
+  "POSTS",
+  "POUCH",
+  "POUND",
+  "POWER",
+  "PRANK",
+  "PRESS",
+  "PRICE",
+  "PRIDE",
+  "PRIME",
+  "PRINT",
+  "PRIOR",
+  "PRIZE",
+  "PROBE",
+  "PROMO",
+  "PRONE",
+  "PROOF",
+  "PROPS",
+  "PROUD",
+  "PROVE",
+  "PROXY",
+  "PSYCH",
+  "PULLS",
+  "PULSE",
+  "PUMPS",
+  "PUNCH",
+  "PUNKS",
+  "PUPIL",
+  "PUPPY",
+  "PURGE",
+  "PURSE",
+  "PUSHY",
+  "PYGMY",
+  "QUACK",
+  "QUEEN",
+  "QUERY",
+  "QUEST",
+  "QUEUE",
+  "QUICK",
+  "QUIET",
+  "QUILT",
+  "QUITE",
+  "QUITS",
+  "QUOTA",
+  "QUOTE",
+  "RABBI",
+  "RACES",
+  "RACKS",
+  "RADAR",
+  "RADIO",
+  "RAIDS",
+  "RAILS",
+  "RAINS",
+  "RAINY",
+  "RAISE",
+  "RALLY",
+  "RALPH",
+  "RANCH",
+  "RANDY",
+  "RANGE",
+  "RANKS",
+  "RAPID",
+  "RATED",
+  "RATES",
+  "RATIO",
+  "RAVEN",
+  "RAZOR",
+  "REACH",
+  "REACT",
+  "READS",
+  "READY",
+  "REALM",
+  "REBEL",
+  "RECON",
+  "REFER",
+  "REHAB",
+  "REIGN",
+  "RELAX",
+  "RELAY",
+  "RELIC",
+  "REMIX",
+  "RENEW",
+  "REPAY",
+  "REPLY",
+  "RESET",
+  "RESTS",
+  "RETRO",
+  "RHINO",
+  "RHYME",
+  "RIDER",
+  "RIDES",
+  "RIDGE",
+  "RIFLE",
+  "RIGHT",
+  "RIGID",
+  "RILEY",
+  "RINGS",
+  "RINSE",
+  "RIOTS",
+  "RISEN",
+  "RISES",
+  "RISKS",
+  "RISKY",
+  "RITES",
+  "RIVAL",
+  "RIVER",
+  "ROADS",
+  "ROARS",
+  "ROAST",
+  "ROBES",
+  "ROBIN",
+  "ROBOT",
+  "ROCKS",
+  "ROCKY",
+  "RODEO",
+  "ROGER",
+  "ROGUE",
+  "ROLES",
+  "ROLLS",
+  "ROMAN",
+  "ROMEO",
+  "ROOMS",
+  "ROOTS",
+  "ROPES",
+  "ROSES",
+  "ROUGE",
+  "ROUGH",
+  "ROUND",
+  "ROUTE",
+  "ROVER",
+  "ROWAN",
+  "ROWDY",
+  "ROYAL",
+  "RUGBY",
+  "RUINS",
+  "RULED",
+  "RULER",
+  "RULES",
+  "RUMOR",
+  "RURAL",
+  "RUSTY",
+  "SACKS",
+  "SADLY",
+  "SAFER",
+  "SAHIB",
+  "SAILS",
+  "SAINT",
+  "SAKES",
+  "SALAD",
+  "SALES",
+  "SALLY",
+  "SALON",
+  "SALSA",
+  "SALTY",
+  "SAMBA",
+  "SANDS",
+  "SANDY",
+  "SANTO",
+  "SARGE",
+  "SATIN",
+  "SAUCE",
+  "SAUNA",
+  "SAVED",
+  "SAVER",
+  "SAVES",
+  "SCALE",
+  "SCALP",
+  "SCANS",
+  "SCARE",
+  "SCARF",
+  "SCARS",
+  "SCARY",
+  "SCENE",
+  "SCENT",
+  "SCOLD",
+  "SCOOP",
+  "SCOOT",
+  "SCOPE",
+  "SCORE",
+  "SCOTS",
+  "SCOUT",
+  "SCRAM",
+  "SCRAP",
+  "SCRUB",
+  "SCUBA",
+  "SEALS",
+  "SEATS",
+  "SEDAN",
+  "SEEDS",
+  "SEEKS",
+  "SEEMS",
+  "SEIZE",
+  "SELLS",
+  "SEMEN",
+  "SENDS",
+  "SENOR",
+  "SENSE",
+  "SERGE",
+  "SERUM",
+  "SERVE",
+  "SETUP",
+  "SEVEN",
+  "SEWER",
+  "SHACK",
+  "SHADE",
+  "SHADY",
+  "SHAFT",
+  "SHAKE",
+  "SHAKY",
+  "SHALL",
+  "SHALT",
+  "SHAME",
+  "SHAPE",
+  "SHARE",
+  "SHARK",
+  "SHARP",
+  "SHAVE",
+  "SHAWN",
+  "SHEEP",
+  "SHEER",
+  "SHEET",
+  "SHELF",
+  "SHELL",
+  "SHIFT",
+  "SHINE",
+  "SHINY",
+  "SHIPS",
+  "SHIRT",
+  "SHIVA",
+  "SHOCK",
+  "SHOES",
+  "SHOOK",
+  "SHOOT",
+  "SHOPS",
+  "SHORE",
+  "SHORT",
+  "SHOTS",
+  "SHOUT",
+  "SHOVE",
+  "SHOWN",
+  "SHOWS",
+  "SHRED",
+  "SHUSH",
+  "SHUTS",
+  "SIDES",
+  "SIEGE",
+  "SIGHS",
+  "SIGHT",
+  "SIGMA",
+  "SIGNS",
+  "SILLY",
+  "SINCE",
+  "SINGS",
+  "SINKS",
+  "SIREN",
+  "SISSY",
+  "SITES",
+  "SIXTH",
+  "SIXTY",
+  "SIZED",
+  "SIZES",
+  "SKATE",
+  "SKIES",
+  "SKILL",
+  "SKINS",
+  "SKIRT",
+  "SKULL",
+  "SKUNK",
+  "SLACK",
+  "SLAIN",
+  "SLAMS",
+  "SLAPS",
+  "SLASH",
+  "SLATE",
+  "SLAVE",
+  "SLEEP",
+  "SLEPT",
+  "SLICE",
+  "SLICK",
+  "SLIDE",
+  "SLIME",
+  "SLIMY",
+  "SLING",
+  "SLIPS",
+  "SLOPE",
+  "SLOTS",
+  "SMACK",
+  "SMALL",
+  "SMART",
+  "SMASH",
+  "SMEAR",
+  "SMELL",
+  "SMILE",
+  "SMITH",
+  "SMOKE",
+  "SNACK",
+  "SNAIL",
+  "SNAKE",
+  "SNAPS",
+  "SNEAK",
+  "SNIFF",
+  "SNOOP",
+  "SNUCK",
+  "SNUFF",
+  "SOBER",
+  "SOCKS",
+  "SOLAR",
+  "SOLID",
+  "SOLVE",
+  "SONAR",
+  "SONGS",
+  "SONIC",
+  "SONNY",
+  "SORRY",
+  "SORTS",
+  "SOULS",
+  "SOUND",
+  "SOUTH",
+  "SPACE",
+  "SPADE",
+  "SPANK",
+  "SPARE",
+  "SPARK",
+  "SPEAK",
+  "SPEAR",
+  "SPECS",
+  "SPEED",
+  "SPELL",
+  "SPEND",
+  "SPENT",
+  "SPERM",
+  "SPICE",
+  "SPICY",
+  "SPIES",
+  "SPIKE",
+  "SPILL",
+  "SPINE",
+  "SPINS",
+  "SPITE",
+  "SPITS",
+  "SPLIT",
+  "SPOIL",
+  "SPOKE",
+  "SPOON",
+  "SPORT",
+  "SPOTS",
+  "SPRAY",
+  "SPREE",
+  "SQUAD",
+  "SQUAT",
+  "SQUID",
+  "STACK",
+  "STAFF",
+  "STAGE",
+  "STAIN",
+  "STAKE",
+  "STALE",
+  "STALK",
+  "STALL",
+  "STAMP",
+  "STAND",
+  "STARE",
+  "STARK",
+  "STARS",
+  "START",
+  "STASH",
+  "STATE",
+  "STATS",
+  "STAYS",
+  "STEAK",
+  "STEAL",
+  "STEAM",
+  "STEED",
+  "STEEL",
+  "STEEP",
+  "STEER",
+  "STEIN",
+  "STEPS",
+  "STERN",
+  "STICK",
+  "STIFF",
+  "STILL",
+  "STING",
+  "STINK",
+  "STOCK",
+  "STOLE",
+  "STOMP",
+  "STONE",
+  "STOOD",
+  "STOOL",
+  "STOOP",
+  "STOPS",
+  "STORE",
+  "STORM",
+  "STORY",
+  "STOVE",
+  "STRAP",
+  "STRAW",
+  "STRAY",
+  "STRIP",
+  "STUCK",
+  "STUDY",
+  "STUFF",
+  "STUMP",
+  "STUNG",
+  "STUNT",
+  "STYLE",
+  "SUCKS",
+  "SUGAR",
+  "SUING",
+  "SUITE",
+  "SUITS",
+  "SULLY",
+  "SUNNY",
+  "SUPER",
+  "SURGE",
+  "SUSHI",
+  "SWAMP",
+  "SWARM",
+  "SWEAR",
+  "SWEAT",
+  "SWEEP",
+  "SWEET",
+  "SWELL",
+  "SWEPT",
+  "SWIFT",
+  "SWINE",
+  "SWING",
+  "SWISS",
+  "SWORD",
+  "SWORE",
+  "SWORN",
+  "SWUNG",
+  "SYKES",
+  "SYRUP",
+  "TABLE",
+  "TACKY",
+  "TACOS",
+  "TAILS",
+  "TAKEN",
+  "TAKES",
+  "TAKIN",
+  "TALES",
+  "TALKS",
+  "TALLY",
+  "TAMMY",
+  "TANGO",
+  "TANKS",
+  "TAPED",
+  "TAPES",
+  "TASKS",
+  "TASTE",
+  "TASTY",
+  "TAXES",
+  "TEACH",
+  "TEAMS",
+  "TEARS",
+  "TEASE",
+  "TEDDY",
+  "TEENS",
+  "TEETH",
+  "TELLS",
+  "TELLY",
+  "TEMPO",
+  "TEMPT",
+  "TENDS",
+  "TENSE",
+  "TENTH",
+  "TENTS",
+  "TERMS",
+  "TERRY",
+  "TESLA",
+  "TESTS",
+  "TEXAS",
+  "TEXTS",
+  "THANK",
+  "THEFT",
+  "THEIR",
+  "THEME",
+  "THERE",
+  "THESE",
+  "THETA",
+  "THICK",
+  "THIEF",
+  "THIGH",
+  "THINE",
+  "THING",
+  "THINK",
+  "THIRD",
+  "THONG",
+  "THORN",
+  "THOSE",
+  "THREE",
+  "THREW",
+  "THROW",
+  "THUDS",
+  "THUGS",
+  "THUMB",
+  "THUMP",
+  "TIDAL",
+  "TIGER",
+  "TIGHT",
+  "TILES",
+  "TIMER",
+  "TIMES",
+  "TIMID",
+  "TIRED",
+  "TIRES",
+  "TITAN",
+  "TITLE",
+  "TOAST",
+  "TODAY",
+  "TOKEN",
+  "TOMMY",
+  "TONER",
+  "TONES",
+  "TONIC",
+  "TOOLS",
+  "TOOTH",
+  "TOOTS",
+  "TOPIC",
+  "TORCH",
+  "TORSO",
+  "TOTAL",
+  "TOUCH",
+  "TOUGH",
+  "TOURS",
+  "TOWEL",
+  "TOWER",
+  "TOWNS",
+  "TOXIC",
+  "TRACE",
+  "TRACK",
+  "TRACT",
+  "TRADE",
+  "TRAIL",
+  "TRAIN",
+  "TRAMP",
+  "TRANS",
+  "TRAPS",
+  "TRASH",
+  "TREAD",
+  "TREAT",
+  "TREES",
+  "TREND",
+  "TRIAD",
+  "TRIAL",
+  "TRIBE",
+  "TRICK",
+  "TRIED",
+  "TRIES",
+  "TRIPS",
+  "TROLL",
+  "TROOP",
+  "TROUT",
+  "TRUCE",
+  "TRUCK",
+  "TRULY",
+  "TRUMP",
+  "TRUNK",
+  "TRUST",
+  "TRUTH",
+  "TRYST",
+  "TUBES",
+  "TUMMY",
+  "TUMOR",
+  "TUNED",
+  "TUNER",
+  "TUNES",
+  "TURBO",
+  "TURKS",
+  "TURNS",
+  "TUTOR",
+  "TWEET",
+  "TWICE",
+  "TWINS",
+  "TWIST",
+  "TYING",
+  "TYPES",
+  "TYRES",
+  "ULTRA",
+  "UNCLE",
+  "UNDER",
+  "UNFIT",
+  "UNION",
+  "UNITE",
+  "UNITS",
+  "UNITY",
+  "UNTIE",
+  "UNTIL",
+  "UPPER",
+  "UPSET",
+  "URBAN",
+  "URINE",
+  "USAGE",
+  "USERS",
+  "USHER",
+  "USING",
+  "USUAL",
+  "UTTER",
+  "VAGUE",
+  "VALET",
+  "VALID",
+  "VALUE",
+  "VALVE",
+  "VAULT",
+  "VEGAN",
+  "VEINS",
+  "VENOM",
+  "VENUE",
+  "VERGE",
+  "VERSE",
+  "VICAR",
+  "VIDEO",
+  "VIEWS",
+  "VILLA",
+  "VINYL",
+  "VIPER",
+  "VIRAL",
+  "VIRUS",
+  "VISIT",
+  "VISTA",
+  "VITAL",
+  "VIVID",
+  "VOCAL",
+  "VODKA",
+  "VOICE",
+  "VOILA",
+  "VOMIT",
+  "VOTED",
+  "VOTES",
+  "VOUCH",
+  "VOWED",
+  "WACKY",
+  "WAGER",
+  "WAGES",
+  "WAGON",
+  "WAILS",
+  "WAIST",
+  "WAITS",
+  "WAKES",
+  "WALES",
+  "WALKS",
+  "WALLS",
+  "WALLY",
+  "WALTZ",
+  "WANTS",
+  "WASTE",
+  "WATCH",
+  "WATER",
+  "WATTS",
+  "WAVES",
+  "WEARS",
+  "WEARY",
+  "WEAVE",
+  "WEDGE",
+  "WEEDS",
+  "WEEKS",
+  "WEIGH",
+  "WEIRD",
+  "WELLS",
+  "WELSH",
+  "WENCH",
+  "WHACK",
+  "WHALE",
+  "WHATS",
+  "WHEAT",
+  "WHEEL",
+  "WHERE",
+  "WHICH",
+  "WHIFF",
+  "WHILE",
+  "WHINE",
+  "WHITE",
+  "WHOLE",
+  "WHOOP",
+  "WHOSE",
+  "WIDER",
+  "WIDOW",
+  "WIDTH",
+  "WILLS",
+  "WILLY",
+  "WINDS",
+  "WINDY",
+  "WINES",
+  "WINGS",
+  "WIPED",
+  "WIRED",
+  "WIRES",
+  "WISER",
+  "WITCH",
+  "WITTY",
+  "WIVES",
+  "WOKEN",
+  "WOMAN",
+  "WOMEN",
+  "WOODS",
+  "WOODY",
+  "WORDS",
+  "WORKS",
+  "WORLD",
+  "WORMS",
+  "WORRY",
+  "WORSE",
+  "WORST",
+  "WORTH",
+  "WOULD",
+  "WOUND",
+  "WRAPS",
+  "WRATH",
+  "WRECK",
+  "WRIST",
+  "WRITE",
+  "WRONG",
+  "WROTE",
+  "XEROX",
+  "YACHT",
+  "YAHOO",
+  "YARDS",
+  "YAWNS",
+  "YEARS",
+  "YEAST",
+  "YELLS",
+  "YELPS",
+  "YIELD",
+  "YIKES",
+  "YOUNG",
+  "YOURS",
+  "YOUSE",
+  "YOUTH",
+  "YUMMY",
+  "ZEBRA",
+  "ZONES",
+
+  // === 6-letter words ===
+  "ABOARD",
+  "ABROAD",
+  "ABSENT",
+  "ABSURD",
+  "ACCENT",
+  "ACCEPT",
+  "ACCESS",
+  "ACCUSE",
+  "ACROSS",
+  "ACTING",
+  "ACTION",
+  "ACTIVE",
+  "ACTORS",
+  "ACTUAL",
+  "ADDING",
+  "ADJUST",
+  "ADMIRE",
+  "ADULTS",
+  "ADVERT",
+  "ADVICE",
+  "ADVISE",
+  "AERIAL",
+  "AFFAIR",
+  "AFFECT",
+  "AFFORD",
+  "AFRAID",
+  "AGENCY",
+  "AGENDA",
+  "AGENTS",
+  "AGREED",
+  "AGREES",
+  "ALASKA",
+  "ALBUMS",
+  "ALERTS",
+  "ALIENS",
+  "ALLIED",
+  "ALLIES",
+  "ALLOWS",
+  "ALMOST",
+  "ALPINE",
+  "ALUMNI",
+  "ALWAYS",
+  "AMAZON",
+  "AMOUNT",
+  "ANALOG",
+  "ANCHOR",
+  "ANGELS",
+  "ANIMAL",
+  "ANNUAL",
+  "ANSWER",
+  "ANYHOW",
+  "ANYONE",
+  "ANYWAY",
+  "APACHE",
+  "APOLLO",
+  "APPEAL",
+  "APPEAR",
+  "APPLES",
+  "ARABIC",
+  "ARCADE",
+  "ARCHER",
+  "ARCTIC",
+  "ARGUED",
+  "AROUND",
+  "ARREST",
+  "ARRIVE",
+  "ARTIST",
+  "ASKING",
+  "ASLEEP",
+  "ASPECT",
+  "ASSESS",
+  "ASSETS",
+  "ASSIGN",
+  "ASSIST",
+  "ASSUME",
+  "ASSURE",
+  "ASTHMA",
+  "ASYLUM",
+  "ATOMIC",
+  "ATTACH",
+  "ATTACK",
+  "ATTEND",
+  "AUBURN",
+  "AUGUST",
+  "AUNTIE",
+  "AURORA",
+  "AUTHOR",
+  "AUTUMN",
+  "AVATAR",
+  "AVENUE",
+  "AWARDS",
+  "AWHILE",
+  "BABIES",
+  "BACKED",
+  "BACKUP",
+  "BAILEY",
+  "BAKING",
+  "BALLET",
+  "BALLOT",
+  "BANANA",
+  "BANNED",
+  "BANNER",
+  "BARELY",
+  "BARREL",
+  "BASICS",
+  "BASKET",
+  "BATMAN",
+  "BATTLE",
+  "BEATEN",
+  "BEAUTY",
+  "BEAVER",
+  "BECAME",
+  "BECOME",
+  "BEFORE",
+  "BEGGED",
+  "BEGINS",
+  "BEHALF",
+  "BEHAVE",
+  "BEHIND",
+  "BEHOLD",
+  "BEINGS",
+  "BELIEF",
+  "BELONG",
+  "BERLIN",
+  "BESIDE",
+  "BETRAY",
+  "BETTER",
+  "BEWARE",
+  "BEYOND",
+  "BIDDER",
+  "BIGGER",
+  "BIKINI",
+  "BINARY",
+  "BISHOP",
+  "BITTER",
+  "BLACKS",
+  "BLADES",
+  "BLAMED",
+  "BLOCKS",
+  "BLONDE",
+  "BLOODY",
+  "BOARDS",
+  "BODIES",
+  "BONNIE",
+  "BOOKED",
+  "BORDER",
+  "BORING",
+  "BORROW",
+  "BOSTON",
+  "BOTHER",
+  "BOTTLE",
+  "BOTTOM",
+  "BOUGHT",
+  "BOUNCE",
+  "BOXING",
+  "BRAINS",
+  "BRAKES",
+  "BRANCH",
+  "BRANDS",
+  "BRANDY",
+  "BRAZIL",
+  "BREACH",
+  "BREAKS",
+  "BREAST",
+  "BREATH",
+  "BREEDS",
+  "BREEZE",
+  "BRIDAL",
+  "BRIDGE",
+  "BRIEFS",
+  "BRIGHT",
+  "BRINGS",
+  "BROKEN",
+  "BROKER",
+  "BRONZE",
+  "BROOKS",
+  "BROWSE",
+  "BRUTAL",
+  "BUBBLE",
+  "BUCKET",
+  "BUDGET",
+  "BUFFER",
+  "BUILDS",
+  "BULLET",
+  "BUMPER",
+  "BUNDLE",
+  "BURDEN",
+  "BUREAU",
+  "BURGER",
+  "BURIED",
+  "BURNED",
+  "BURNER",
+  "BURTON",
+  "BUSTED",
+  "BUTLER",
+  "BUTTER",
+  "BUTTON",
+  "BUYERS",
+  "BUYING",
+  "BUZZER",
+  "CABLES",
+  "CACHED",
+  "CAESAR",
+  "CALLED",
+  "CAMERA",
+  "CAMPUS",
+  "CANCEL",
+  "CANCER",
+  "CANDLE",
+  "CANNON",
+  "CANNOT",
+  "CANVAS",
+  "CANYON",
+  "CARBON",
+  "CAREER",
+  "CARING",
+  "CARMEN",
+  "CARPET",
+  "CARTER",
+  "CASINO",
+  "CASTLE",
+  "CASUAL",
+  "CATTLE",
+  "CAUGHT",
+  "CAUSED",
+  "CAUSES",
+  "CAYMAN",
+  "CELEBS",
+  "CELLAR",
+  "CEMENT",
+  "CENSUS",
+  "CENTER",
+  "CENTRE",
+  "CHAINS",
+  "CHAIRS",
+  "CHANCE",
+  "CHANGE",
+  "CHAPEL",
+  "CHARGE",
+  "CHARMS",
+  "CHARTS",
+  "CHASED",
+  "CHEATS",
+  "CHECKS",
+  "CHEERS",
+  "CHEESE",
+  "CHEQUE",
+  "CHERRY",
+  "CHICKS",
+  "CHIMES",
+  "CHOICE",
+  "CHOOSE",
+  "CHORUS",
+  "CHOSEN",
+  "CHROME",
+  "CHUBBY",
+  "CHURCH",
+  "CINEMA",
+  "CIRCLE",
+  "CIRCUS",
+  "CITIES",
+  "CLAIMS",
+  "CLAUSE",
+  "CLEARS",
+  "CLEVER",
+  "CLICKS",
+  "CLIENT",
+  "CLINIC",
+  "CLOCKS",
+  "CLOSED",
+  "CLOSER",
+  "CLOSES",
+  "CLOSET",
+  "CLOUDS",
+  "CLOUDY",
+  "COATED",
+  "CODING",
+  "COFFEE",
+  "COFFIN",
+  "COLLAR",
+  "COLONY",
+  "COLORS",
+  "COLOUR",
+  "COLUMN",
+  "COMBAT",
+  "COMEDY",
+  "COMICS",
+  "COMING",
+  "COMMIT",
+  "COMMON",
+  "COMPLY",
+  "CONDOS",
+  "COOKED",
+  "COOKIE",
+  "COOLER",
+  "COOPER",
+  "COPIED",
+  "COPIES",
+  "COPPER",
+  "CORNER",
+  "CORPSE",
+  "CORPUS",
+  "COTTON",
+  "COUGHS",
+  "COUNTS",
+  "COUNTY",
+  "COUPLE",
+  "COUPON",
+  "COURSE",
+  "COURTS",
+  "COUSIN",
+  "COVERS",
+  "COWARD",
+  "COWBOY",
+  "CRADLE",
+  "CRAFTS",
+  "CREATE",
+  "CREDIT",
+  "CREEPY",
+  "CRIMES",
+  "CRISIS",
+  "CRUISE",
+  "CRYING",
+  "CURSED",
+  "CURSOR",
+  "CURVES",
+  "CUSTOM",
+  "CYCLES",
+  "CYPRUS",
+  "DAMAGE",
+  "DAMNED",
+  "DANCED",
+  "DANCER",
+  "DANGER",
+  "DANISH",
+  "DAPHNE",
+  "DATING",
+  "DEADLY",
+  "DEALER",
+  "DEATHS",
+  "DEBATE",
+  "DECADE",
+  "DECENT",
+  "DECIDE",
+  "DEEMED",
+  "DEEPER",
+  "DEEPLY",
+  "DEFEAT",
+  "DEFEND",
+  "DEFINE",
+  "DEGREE",
+  "DELAYS",
+  "DELETE",
+  "DELUXE",
+  "DEMAND",
+  "DEMONS",
+  "DENIAL",
+  "DENIED",
+  "DENTAL",
+  "DEPEND",
+  "DEPUTY",
+  "DESERT",
+  "DESIGN",
+  "DESIRE",
+  "DETAIL",
+  "DETECT",
+  "DEVICE",
+  "DIALOG",
+  "DIESEL",
+  "DIFFER",
+  "DIGEST",
+  "DINING",
+  "DINNER",
+  "DIRECT",
+  "DISHES",
+  "DIVIDE",
+  "DIVINE",
+  "DIVING",
+  "DOCTOR",
+  "DOLLAR",
+  "DOMAIN",
+  "DONATE",
+  "DONKEY",
+  "DONORS",
+  "DOOMED",
+  "DOSAGE",
+  "DOUBLE",
+  "DOUBTS",
+  "DOZENS",
+  "DRAGON",
+  "DRAWER",
+  "DREAMS",
+  "DREAMT",
+  "DRINKS",
+  "DRIVEN",
+  "DRIVER",
+  "DRIVES",
+  "DUMPED",
+  "DURING",
+  "DUTIES",
+  "EAGLES",
+  "EARNED",
+  "EASIER",
+  "EASILY",
+  "EASTER",
+  "EATING",
+  "EDITED",
+  "EDITOR",
+  "EFFECT",
+  "EFFORT",
+  "EITHER",
+  "ELEVEN",
+  "EMPIRE",
+  "EMPLOY",
+  "ENABLE",
+  "ENDING",
+  "ENERGY",
+  "ENGAGE",
+  "ENGINE",
+  "ENOUGH",
+  "ENSURE",
+  "ENTERS",
+  "ENTIRE",
+  "ENTITY",
+  "ENZYME",
+  "EQUITY",
+  "ERRORS",
+  "ESCAPE",
+  "ESCORT",
+  "ESSAYS",
+  "ESTATE",
+  "ETHICS",
+  "ETHNIC",
+  "EVENTS",
+  "EXCEED",
+  "EXCEPT",
+  "EXCESS",
+  "EXCUSE",
+  "EXEMPT",
+  "EXISTS",
+  "EXOTIC",
+  "EXPAND",
+  "EXPECT",
+  "EXPERT",
+  "EXPORT",
+  "EXPOSE",
+  "EXTEND",
+  "EXTENT",
+  "EXTRAS",
+  "FABRIC",
+  "FACIAL",
+  "FACING",
+  "FACTOR",
+  "FAILED",
+  "FAIRLY",
+  "FALLEN",
+  "FAMILY",
+  "FAMOUS",
+  "FARMER",
+  "FASTER",
+  "FATHER",
+  "FAVORS",
+  "FAVOUR",
+  "FELLAS",
+  "FELLOW",
+  "FEMALE",
+  "FETISH",
+  "FIELDS",
+  "FIGHTS",
+  "FIGURE",
+  "FILING",
+  "FILLED",
+  "FILTER",
+  "FILTHY",
+  "FINALS",
+  "FINDER",
+  "FINEST",
+  "FINGER",
+  "FINISH",
+  "FINITE",
+  "FIRING",
+  "FISCAL",
+  "FISHER",
+  "FITTED",
+  "FIXING",
+  "FLAMES",
+  "FLAVOR",
+  "FLEECE",
+  "FLIGHT",
+  "FLOORS",
+  "FLOPPY",
+  "FLORAL",
+  "FLOWER",
+  "FLYING",
+  "FOLDER",
+  "FOLLOW",
+  "FOOLED",
+  "FORBID",
+  "FORCED",
+  "FORCES",
+  "FOREST",
+  "FORGET",
+  "FORGOT",
+  "FORMAL",
+  "FORMAT",
+  "FORMED",
+  "FORMER",
+  "FORUMS",
+  "FOSSIL",
+  "FOSTER",
+  "FOUGHT",
+  "FOURTH",
+  "FRAMED",
+  "FRAMES",
+  "FRANCS",
+  "FREELY",
+  "FREEZE",
+  "FRENCH",
+  "FRIDGE",
+  "FRIEND",
+  "FROZEN",
+  "FRUITS",
+  "FUNDED",
+  "FUSION",
+  "FUTURE",
+  "GAINED",
+  "GALAXY",
+  "GAMBLE",
+  "GAMING",
+  "GARAGE",
+  "GARDEN",
+  "GARLIC",
+  "GATHER",
+  "GENDER",
+  "GENEVA",
+  "GENIUS",
+  "GENOME",
+  "GENRES",
+  "GENTLE",
+  "GENTLY",
+  "GERMAN",
+  "GHOSTS",
+  "GIANTS",
+  "GIBSON",
+  "GINGER",
+  "GIVING",
+  "GLANCE",
+  "GLOBAL",
+  "GLORIA",
+  "GLOVES",
+  "GOLDEN",
+  "GOSPEL",
+  "GOSSIP",
+  "GOTHIC",
+  "GOTTEN",
+  "GRADES",
+  "GRAHAM",
+  "GRANNY",
+  "GRANTS",
+  "GRAPHS",
+  "GRATIS",
+  "GREEDY",
+  "GROANS",
+  "GROOVE",
+  "GROUND",
+  "GROUPS",
+  "GROWLS",
+  "GROWTH",
+  "GRUNTS",
+  "GUARDS",
+  "GUESTS",
+  "GUIDED",
+  "GUIDES",
+  "GUILTY",
+  "GUINEA",
+  "GUITAR",
+  "HABITS",
+  "HACKER",
+  "HAMMER",
+  "HANDED",
+  "HANDLE",
+  "HAPPEN",
+  "HARBOR",
+  "HARDER",
+  "HARDLY",
+  "HARPER",
+  "HATRED",
+  "HAVING",
+  "HAZARD",
+  "HEADED",
+  "HEADER",
+  "HEALTH",
+  "HEARTS",
+  "HEATED",
+  "HEATER",
+  "HEAVEN",
+  "HECTOR",
+  "HEIGHT",
+  "HELMET",
+  "HELPED",
+  "HERALD",
+  "HERBAL",
+  "HEREBY",
+  "HEREIN",
+  "HEROES",
+  "HEROIN",
+  "HIDDEN",
+  "HIDING",
+  "HIGHER",
+  "HIGHLY",
+  "HIKING",
+  "HIRING",
+  "HOCKEY",
+  "HOLDER",
+  "HOLLOW",
+  "HONEST",
+  "HONORS",
+  "HONOUR",
+  "HOOKED",
+  "HOOKER",
+  "HOPING",
+  "HORROR",
+  "HORSES",
+  "HOSTED",
+  "HOSTEL",
+  "HOTELS",
+  "HOURLY",
+  "HOUSES",
+  "HUMANS",
+  "HUMBLE",
+  "HUNGER",
+  "HUNGRY",
+  "HUNTER",
+  "HYBRID",
+  "IDIOTS",
+  "IGNORE",
+  "IMAGES",
+  "IMMUNE",
+  "IMPACT",
+  "IMPORT",
+  "IMPOSE",
+  "INCHES",
+  "INCOME",
+  "INDEED",
+  "INDOOR",
+  "INFANT",
+  "INFORM",
+  "INJURY",
+  "INKJET",
+  "INPUTS",
+  "INSANE",
+  "INSERT",
+  "INSIDE",
+  "INSIST",
+  "INSULT",
+  "INTACT",
+  "INTAKE",
+  "INTEND",
+  "INTENT",
+  "INVEST",
+  "INVITE",
+  "ISLAND",
+  "ISSUED",
+  "ISSUES",
+  "ITALIC",
+  "ITSELF",
+  "JACKET",
+  "JAGUAR",
+  "JERSEY",
+  "JEWELS",
+  "JOHNNY",
+  "JOINED",
+  "JOKING",
+  "JORDAN",
+  "JOSEPH",
+  "JUDGES",
+  "JUMPED",
+  "JUNGLE",
+  "JUNIOR",
+  "KERNEL",
+  "KICKED",
+  "KIDNAP",
+  "KIDNEY",
+  "KILLED",
+  "KILLER",
+  "KINASE",
+  "KINDLY",
+  "KISSED",
+  "KISSES",
+  "KNIGHT",
+  "KNIVES",
+  "KNOCKS",
+  "LABELS",
+  "LABOUR",
+  "LADDER",
+  "LADIES",
+  "LAMBDA",
+  "LANDED",
+  "LAPTOP",
+  "LARGER",
+  "LATELY",
+  "LATEST",
+  "LATINO",
+  "LATTER",
+  "LAUGHS",
+  "LAUNCH",
+  "LAWYER",
+  "LAYERS",
+  "LAYING",
+  "LAYOUT",
+  "LEADER",
+  "LEAGUE",
+  "LEARNT",
+  "LEAVES",
+  "LEGACY",
+  "LEGEND",
+  "LENDER",
+  "LENGTH",
+  "LENSES",
+  "LESSER",
+  "LESSON",
+  "LETTER",
+  "LEVELS",
+  "LIABLE",
+  "LIFTED",
+  "LIGHTS",
+  "LIKELY",
+  "LIKING",
+  "LIMITS",
+  "LINEAR",
+  "LINKED",
+  "LIQUID",
+  "LIQUOR",
+  "LISTED",
+  "LISTEN",
+  "LITTLE",
+  "LIVING",
+  "LOADED",
+  "LOCALE",
+  "LOCATE",
+  "LOCKED",
+  "LOCKER",
+  "LOGGED",
+  "LONELY",
+  "LONGER",
+  "LOOKED",
+  "LOOKUP",
+  "LOSERS",
+  "LOSING",
+  "LOSSES",
+  "LOUDER",
+  "LOUDLY",
+  "LOUNGE",
+  "LOVELY",
+  "LOVERS",
+  "LOVING",
+  "LOWEST",
+  "LUXURY",
+  "LYRICS",
+  "MADAME",
+  "MAGNET",
+  "MAIDEN",
+  "MAILED",
+  "MAINLY",
+  "MAKERS",
+  "MAKEUP",
+  "MAKING",
+  "MANAGE",
+  "MANIAC",
+  "MANNER",
+  "MANUAL",
+  "MARBLE",
+  "MARGIN",
+  "MARINA",
+  "MARINE",
+  "MARKED",
+  "MARKER",
+  "MARKET",
+  "MARTIN",
+  "MARVEL",
+  "MASTER",
+  "MATING",
+  "MATRIX",
+  "MATTER",
+  "MATURE",
+  "MEDIAN",
+  "MEDIUM",
+  "MELODY",
+  "MEMBER",
+  "MEMORY",
+  "MENTAL",
+  "MENTOR",
+  "MERELY",
+  "MERGER",
+  "MESSED",
+  "METALS",
+  "METERS",
+  "METHOD",
+  "METRES",
+  "METRIC",
+  "MICKEY",
+  "MIDDLE",
+  "MIGHTY",
+  "MILLER",
+  "MINING",
+  "MINUTE",
+  "MIRROR",
+  "MISERY",
+  "MISSED",
+  "MISSES",
+  "MISTER",
+  "MIXING",
+  "MOBILE",
+  "MODELS",
+  "MODEMS",
+  "MODERN",
+  "MODIFY",
+  "MODULE",
+  "MOMENT",
+  "MONKEY",
+  "MONTHS",
+  "MORGAN",
+  "MORGUE",
+  "MORRIS",
+  "MORTAL",
+  "MOSTLY",
+  "MOTELS",
+  "MOTHER",
+  "MOTION",
+  "MOTIVE",
+  "MOTORS",
+  "MOUNTS",
+  "MOUTHS",
+  "MOVERS",
+  "MOVIES",
+  "MOVING",
+  "MURDER",
+  "MURPHY",
+  "MUSCLE",
+  "MUSEUM",
+  "MUTUAL",
+  "MYRTLE",
+  "MYSELF",
+  "NAILED",
+  "NAMELY",
+  "NARROW",
+  "NATION",
+  "NATIVE",
+  "NATURE",
+  "NEARBY",
+  "NEARLY",
+  "NEEDED",
+  "NEEDLE",
+  "NELSON",
+  "NEPHEW",
+  "NERVES",
+  "NESTED",
+  "NEURAL",
+  "NEWEST",
+  "NEWTON",
+  "NICELY",
+  "NICKEL",
+  "NIGHTS",
+  "NOBODY",
+  "NOISES",
+  "NORMAL",
+  "NOTICE",
+  "NOTIFY",
+  "NOTION",
+  "NOVELS",
+  "NUDIST",
+  "NUMBER",
+  "NURSES",
+  "OBJECT",
+  "OBTAIN",
+  "OCCURS",
+  "OFFERS",
+  "OFFICE",
+  "OFFSET",
+  "OLDEST",
+  "OPENED",
+  "OPTICS",
+  "OPTION",
+  "ORACLE",
+  "ORANGE",
+  "ORDERS",
+  "ORGANS",
+  "ORIGIN",
+  "ORPHAN",
+  "OTHERS",
+  "OUTFIT",
+  "OUTLET",
+  "OUTPUT",
+  "OWNERS",
+  "OXFORD",
+  "OXYGEN",
+  "PACKED",
+  "PACKET",
+  "PALACE",
+  "PALMER",
+  "PANAMA",
+  "PANELS",
+  "PAPERS",
+  "PARADE",
+  "PARCEL",
+  "PARDON",
+  "PARENT",
+  "PARISH",
+  "PARKED",
+  "PARKER",
+  "PAROLE",
+  "PARTLY",
+  "PASSED",
+  "PASSES",
+  "PASTOR",
+  "PATENT",
+  "PATROL",
+  "PAYDAY",
+  "PAYING",
+  "PEANUT",
+  "PEEING",
+  "PENCIL",
+  "PEOPLE",
+  "PEPPER",
+  "PERIOD",
+  "PERMIT",
+  "PERSON",
+  "PETITE",
+  "PHASES",
+  "PHOEBE",
+  "PHONED",
+  "PHONES",
+  "PHOTOS",
+  "PHRASE",
+  "PICKED",
+  "PICKUP",
+  "PICNIC",
+  "PIECES",
+  "PIERCE",
+  "PILLOW",
+  "PIRATE",
+  "PISTOL",
+  "PIXELS",
+  "PLACED",
+  "PLACES",
+  "PLAGUE",
+  "PLAINS",
+  "PLANES",
+  "PLANET",
+  "PLANTS",
+  "PLASMA",
+  "PLATES",
+  "PLAYED",
+  "PLAYER",
+  "PLEASE",
+  "PLEDGE",
+  "PLENTY",
+  "POCKET",
+  "POETRY",
+  "POINTS",
+  "POISON",
+  "POLICE",
+  "POLICY",
+  "POLISH",
+  "POLITE",
+  "POPPED",
+  "PORTAL",
+  "PORTER",
+  "POSING",
+  "POSTAL",
+  "POSTED",
+  "POSTER",
+  "POTATO",
+  "POTTER",
+  "POUNDS",
+  "POWDER",
+  "POWERS",
+  "PRAISE",
+  "PRAYER",
+  "PREFER",
+  "PREFIX",
+  "PRETTY",
+  "PRICED",
+  "PRICES",
+  "PRIEST",
+  "PRINCE",
+  "PRINTS",
+  "PRISON",
+  "PRIZES",
+  "PROFIT",
+  "PROMPT",
+  "PROPER",
+  "PROVED",
+  "PROVEN",
+  "PROVES",
+  "PSYCHO",
+  "PUBLIC",
+  "PULLED",
+  "PUNISH",
+  "PUPILS",
+  "PUPPET",
+  "PURPLE",
+  "PURSUE",
+  "PUSHED",
+  "PUZZLE",
+  "PYTHON",
+  "QUEENS",
+  "QUIRKY",
+  "QUOTED",
+  "QUOTES",
+  "RABBIT",
+  "RACIAL",
+  "RACING",
+  "RACIST",
+  "RADIOS",
+  "RADIUS",
+  "RAISED",
+  "RAISES",
+  "RANDOM",
+  "RANGER",
+  "RANGES",
+  "RANKED",
+  "RANSOM",
+  "RAPIDS",
+  "RARELY",
+  "RASCAL",
+  "RATHER",
+  "RATING",
+  "RATIOS",
+  "READER",
+  "REALLY",
+  "REALTY",
+  "REASON",
+  "REBATE",
+  "RECALL",
+  "RECENT",
+  "RECIPE",
+  "RECKON",
+  "RECORD",
+  "REDEEM",
+  "REDUCE",
+  "REFERS",
+  "REFINE",
+  "REFORM",
+  "REFUND",
+  "REFUSE",
+  "REGARD",
+  "REGGAE",
+  "REGIME",
+  "REGION",
+  "REGRET",
+  "REJECT",
+  "RELATE",
+  "RELIEF",
+  "RELOAD",
+  "REMAIN",
+  "REMARK",
+  "REMEDY",
+  "REMIND",
+  "REMOTE",
+  "REMOVE",
+  "RENDER",
+  "RENTAL",
+  "RENTED",
+  "REPAIR",
+  "REPEAT",
+  "REPORT",
+  "RESCUE",
+  "RESIGN",
+  "RESIST",
+  "RESORT",
+  "RESULT",
+  "RESUME",
+  "RETAIL",
+  "RETAIN",
+  "RETIRE",
+  "RETURN",
+  "REVEAL",
+  "REVIEW",
+  "REWARD",
+  "RHYTHM",
+  "RIBBON",
+  "RIDERS",
+  "RIDING",
+  "RIGHTS",
+  "RIPPED",
+  "RISING",
+  "RITUAL",
+  "RIVERS",
+  "ROBBED",
+  "ROBOTS",
+  "ROBUST",
+  "ROCKET",
+  "ROGERS",
+  "ROLLED",
+  "ROLLER",
+  "ROSTER",
+  "ROTARY",
+  "ROTTEN",
+  "ROUNDS",
+  "ROUTER",
+  "ROUTES",
+  "RUBBER",
+  "RUINED",
+  "RULING",
+  "RUMORS",
+  "RUNNER",
+  "RUNWAY",
+  "RUPEES",
+  "SACRED",
+  "SAFARI",
+  "SAFELY",
+  "SAFETY",
+  "SAILOR",
+  "SAINTS",
+  "SALARY",
+  "SALMON",
+  "SALUTE",
+  "SAMPLE",
+  "SAVAGE",
+  "SAVING",
+  "SAYING",
+  "SCALES",
+  "SCARED",
+  "SCARES",
+  "SCENES",
+  "SCENIC",
+  "SCHEMA",
+  "SCHEME",
+  "SCHOOL",
+  "SCOFFS",
+  "SCORED",
+  "SCORES",
+  "SCOTCH",
+  "SCOTIA",
+  "SCREAM",
+  "SCREEN",
+  "SCRIPT",
+  "SCROLL",
+  "SEALED",
+  "SEARCH",
+  "SEASON",
+  "SEATED",
+  "SECOND",
+  "SECRET",
+  "SECTOR",
+  "SECURE",
+  "SEEING",
+  "SEEKER",
+  "SEEMED",
+  "SELECT",
+  "SELLER",
+  "SENATE",
+  "SENDER",
+  "SENIOR",
+  "SENSES",
+  "SENSOR",
+  "SERIAL",
+  "SERIES",
+  "SERVED",
+  "SERVER",
+  "SERVES",
+  "SETTLE",
+  "SEVERE",
+  "SEWING",
+  "SEXUAL",
+  "SHADES",
+  "SHADOW",
+  "SHAPED",
+  "SHAPES",
+  "SHARED",
+  "SHARES",
+  "SHARKS",
+  "SHAVED",
+  "SHEETS",
+  "SHEILA",
+  "SHIELD",
+  "SHIRTS",
+  "SHOOTS",
+  "SHORTS",
+  "SHOULD",
+  "SHOUTS",
+  "SHOWED",
+  "SHOWER",
+  "SHRIMP",
+  "SHRINK",
+  "SIERRA",
+  "SIGNAL",
+  "SIGNED",
+  "SILENT",
+  "SILVER",
+  "SIMPLE",
+  "SIMPLY",
+  "SINGER",
+  "SINGLE",
+  "SIRENS",
+  "SISTER",
+  "SKETCH",
+  "SKIING",
+  "SKILLS",
+  "SKINNY",
+  "SKIRTS",
+  "SLAVES",
+  "SLEEPS",
+  "SLEEPY",
+  "SLEEVE",
+  "SLIDES",
+  "SLIGHT",
+  "SLOWLY",
+  "SMELLS",
+  "SMOKED",
+  "SMOOTH",
+  "SNAKES",
+  "SNIFFS",
+  "SOCCER",
+  "SOCIAL",
+  "SOCKET",
+  "SODIUM",
+  "SOFTLY",
+  "SOLELY",
+  "SOLVED",
+  "SOONER",
+  "SORROW",
+  "SORTED",
+  "SOUGHT",
+  "SOUNDS",
+  "SOURCE",
+  "SOVIET",
+  "SPACES",
+  "SPEAKS",
+  "SPEARS",
+  "SPEECH",
+  "SPEEDS",
+  "SPHERE",
+  "SPHINX",
+  "SPIDER",
+  "SPIRIT",
+  "SPOKEN",
+  "SPORTS",
+  "SPOUSE",
+  "SPREAD",
+  "SPRING",
+  "SPRINT",
+  "SPYING",
+  "SQUARE",
+  "STABLE",
+  "STAGES",
+  "STAIRS",
+  "STAMPS",
+  "STANDS",
+  "STARTS",
+  "STARVE",
+  "STATED",
+  "STATES",
+  "STATIC",
+  "STATUE",
+  "STATUS",
+  "STAYED",
+  "STEADY",
+  "STELLA",
+  "STEREO",
+  "STICKS",
+  "STICKY",
+  "STINKS",
+  "STOCKS",
+  "STOLEN",
+  "STONES",
+  "STORED",
+  "STORES",
+  "STRAIN",
+  "STRAND",
+  "STREAM",
+  "STREET",
+  "STRESS",
+  "STRICT",
+  "STRIKE",
+  "STRING",
+  "STRIPS",
+  "STROKE",
+  "STRONG",
+  "STRUCK",
+  "STUDIO",
+  "STUPID",
+  "STYLES",
+  "STYLUS",
+  "SUBMIT",
+  "SUBTLE",
+  "SUBWAY",
+  "SUCKED",
+  "SUCKER",
+  "SUDDEN",
+  "SUFFER",
+  "SUITED",
+  "SUITES",
+  "SUMMER",
+  "SUMMIT",
+  "SUNSET",
+  "SUPERB",
+  "SUPPER",
+  "SUPPLY",
+  "SURELY",
+  "SURREY",
+  "SURVEY",
+  "SWEETS",
+  "SWITCH",
+  "SWORDS",
+  "SYMBOL",
+  "SYNTAX",
+  "SYSTEM",
+  "TABLES",
+  "TABLET",
+  "TACKLE",
+  "TAGGED",
+  "TAKING",
+  "TALENT",
+  "TALKED",
+  "TANNER",
+  "TARGET",
+  "TARIFF",
+  "TASTES",
+  "TATTOO",
+  "TAUGHT",
+  "TEMPER",
+  "TEMPLE",
+  "TENANT",
+  "TENDER",
+  "TENNIS",
+  "TERROR",
+  "TESTED",
+  "THANKS",
+  "THEIRS",
+  "THEMES",
+  "THEORY",
+  "THESIS",
+  "THINGS",
+  "THINKS",
+  "THIRTY",
+  "THONGS",
+  "THOUGH",
+  "THREAD",
+  "THREAT",
+  "THROAT",
+  "THRONE",
+  "THROWN",
+  "THROWS",
+  "THUMBS",
+  "TICKET",
+  "TIGERS",
+  "TIMBER",
+  "TIMELY",
+  "TIMING",
+  "TISSUE",
+  "TITANS",
+  "TITLED",
+  "TITLES",
+  "TOILET",
+  "TOMATO",
+  "TONGUE",
+  "TOPICS",
+  "TOTALS",
+  "TOWARD",
+  "TOWERS",
+  "TRACES",
+  "TRACKS",
+  "TRADER",
+  "TRADES",
+  "TRAGIC",
+  "TRAILS",
+  "TRAINS",
+  "TRANCE",
+  "TRAUMA",
+  "TRAVEL",
+  "TREATY",
+  "TRENDS",
+  "TRIALS",
+  "TRIBAL",
+  "TRIBES",
+  "TRICKS",
+  "TRICKY",
+  "TRIPLE",
+  "TRIVIA",
+  "TROOPS",
+  "TROPHY",
+  "TRUCKS",
+  "TRUSTS",
+  "TRYING",
+  "TUCKER",
+  "TUNING",
+  "TUNNEL",
+  "TURKEY",
+  "TURNED",
+  "TURNER",
+  "TURTLE",
+  "TWELVE",
+  "TWENTY",
+  "TYPING",
+  "UNABLE",
+  "UNFAIR",
+  "UNIONS",
+  "UNIQUE",
+  "UNITED",
+  "UNLESS",
+  "UNLIKE",
+  "UNLOCK",
+  "UNWRAP",
+  "UPBEAT",
+  "UPDATE",
+  "UPLOAD",
+  "UPSIDE",
+  "URGENT",
+  "USEFUL",
+  "VACUUM",
+  "VALLEY",
+  "VALUED",
+  "VALUES",
+  "VALVES",
+  "VARIED",
+  "VARIES",
+  "VECTOR",
+  "VELVET",
+  "VENDOR",
+  "VENUES",
+  "VERBAL",
+  "VERIFY",
+  "VERSUS",
+  "VERTEX",
+  "VESSEL",
+  "VICTIM",
+  "VICTOR",
+  "VIDEOS",
+  "VIEWED",
+  "VIEWER",
+  "VIKING",
+  "VILLAS",
+  "VIOLET",
+  "VIOLIN",
+  "VIRGIN",
+  "VIRTUE",
+  "VISION",
+  "VISITS",
+  "VISUAL",
+  "VOCALS",
+  "VOICES",
+  "VOLUME",
+  "VOTERS",
+  "VOTING",
+  "WAITED",
+  "WAITER",
+  "WAIVER",
+  "WAKING",
+  "WALKED",
+  "WALKER",
+  "WALLET",
+  "WALNUT",
+  "WANTED",
+  "WARDEN",
+  "WARNED",
+  "WARNER",
+  "WARREN",
+  "WASHED",
+  "WASHER",
+  "WASTED",
+  "WATERS",
+  "WEALTH",
+  "WEAPON",
+  "WEEKLY",
+  "WEIGHT",
+  "WHEELS",
+  "WHILST",
+  "WICKED",
+  "WIDELY",
+  "WILLOW",
+  "WINDOW",
+  "WINNER",
+  "WINTER",
+  "WIRING",
+  "WISDOM",
+  "WISHED",
+  "WISHES",
+  "WITHIN",
+  "WIZARD",
+  "WOLVES",
+  "WONDER",
+  "WOODEN",
+  "WORKED",
+  "WORKER",
+  "WORLDS",
+  "WORTHY",
+  "WOUNDS",
+  "WRIGHT",
+  "WRITER",
+  "WRITES",
+  "YEARLY",
+  "YELLOW",
+  "YIELDS",
+  "ZOMBIE",
+  "ZONING",
+
+  // === 7-letter words ===
+  "ABILITY",
+  "ACADEMY",
+  "ACCOUNT",
+  "ACCUSED",
+  "ACTIONS",
+  "ACTRESS",
+  "ADDRESS",
+  "ADVANCE",
+  "AFFAIRS",
+  "AGAINST",
+  "AIRPORT",
+  "ALCOHOL",
+  "ALLOWED",
+  "ALREADY",
+  "ALRIGHT",
+  "AMAZING",
+  "ANCIENT",
+  "ANIMALS",
+  "ANOTHER",
+  "ANSWERS",
+  "ANYBODY",
+  "ANYMORE",
+  "ANYTIME",
+  "APOLOGY",
+  "APPEARS",
+  "ARRANGE",
+  "ARRIVED",
+  "ARTICLE",
+  "ARTISTS",
+  "ASHAMED",
+  "ASSAULT",
+  "ATTACKS",
+  "ATTEMPT",
+  "AVERAGE",
+  "AWESOME",
+  "AWKWARD",
+  "BALANCE",
+  "BARKING",
+  "BEATING",
+  "BECAUSE",
+  "BECOMES",
+  "BEDROOM",
+  "BEEPING",
+  "BEGGING",
+  "BELIEVE",
+  "BELONGS",
+  "BELOVED",
+  "BENEATH",
+  "BENEFIT",
+  "BESIDES",
+  "BETWEEN",
+  "BIGGEST",
+  "BILLION",
+  "BLESSED",
+  "BLOWING",
+  "BOTTLES",
+  "BREATHE",
+  "BROTHER",
+  "BROUGHT",
+  "BULLETS",
+  "BURNING",
+  "BUZZING",
+  "CALLING",
+  "CAMERAS",
+  "CAPABLE",
+  "CAPITAL",
+  "CAPTAIN",
+  "CAPTURE",
+  "CAREFUL",
+  "CARRIED",
+  "CENTRAL",
+  "CENTURY",
+  "CERTAIN",
+  "CHAMBER",
+  "CHANCES",
+  "CHANGED",
+  "CHANGES",
+  "CHANNEL",
+  "CHARGED",
+  "CHARGES",
+  "CHARITY",
+  "CHARLIE",
+  "CHASING",
+  "CHATTER",
+  "CHEATED",
+  "CHECKED",
+  "CHICKEN",
+  "CHOICES",
+  "CITIZEN",
+  "CLASSES",
+  "CLASSIC",
+  "CLEANED",
+  "CLEARED",
+  "CLEARLY",
+  "CLIENTS",
+  "CLOSING",
+  "CLOTHES",
+  "COLLECT",
+  "COLLEGE",
+  "COLONEL",
+  "COMFORT",
+  "COMMAND",
+  "COMMENT",
+  "COMPANY",
+  "COMPLEX",
+  "COMRADE",
+  "CONCERN",
+  "CONCERT",
+  "CONFESS",
+  "CONFIRM",
+  "CONTACT",
+  "CONTEST",
+  "CONTROL",
+  "COOKING",
+  "CORRECT",
+  "COSTUME",
+  "COUNCIL",
+  "COUNTRY",
+  "COURAGE",
+  "COVERED",
+  "CREATED",
+  "CROSSED",
+  "CRYSTAL",
+  "CULTURE",
+  "CURIOUS",
+  "CURRENT",
+  "CUSTODY",
+  "CUTTING",
+  "DANCING",
+  "DARLING",
+  "DEALING",
+  "DECIDED",
+  "DEFENSE",
+  "DEGREES",
+  "DELIVER",
+  "DEPENDS",
+  "DESERVE",
+  "DESPITE",
+  "DESTINY",
+  "DESTROY",
+  "DETAILS",
+  "DIAMOND",
+  "DIGGING",
+  "DISCUSS",
+  "DISEASE",
+  "DISTANT",
+  "DIVORCE",
+  "DOCTORS",
+  "DOLLARS",
+  "DRAGGED",
+  "DRAWING",
+  "DREAMED",
+  "DRESSED",
+  "DRIVING",
+  "DROPPED",
+  "EARLIER",
+  "EFFECTS",
+  "EMPEROR",
+  "ENEMIES",
+  "ENGAGED",
+  "ENGLISH",
+  "ENJOYED",
+  "ENTERED",
+  "EPISODE",
+  "ESCAPED",
+  "ETERNAL",
+  "EVENING",
+  "EXACTLY",
+  "EXAMPLE",
+  "EXCITED",
+  "EXHALES",
+  "EXPLAIN",
+  "EXPRESS",
+  "EXTREME",
+  "FACTORY",
+  "FAILURE",
+  "FALLING",
+  "FANTASY",
+  "FASHION",
+  "FEDERAL",
+  "FEELING",
+  "FIGHTER",
+  "FIGURED",
+  "FIGURES",
+  "FINALLY",
+  "FINDING",
+  "FINGERS",
+  "FISHING",
+  "FLOWERS",
+  "FOOLISH",
+  "FOOTAGE",
+  "FOREIGN",
+  "FOREVER",
+  "FORGIVE",
+  "FORTUNE",
+  "FORWARD",
+  "FRANKLY",
+  "FREEDOM",
+  "FRIENDS",
+  "FUNERAL",
+  "FURTHER",
+  "GARBAGE",
+  "GASPING",
+  "GENERAL",
+  "GERMANS",
+  "GETTING",
+  "GLASSES",
+  "GODDAMN",
+  "GOODBYE",
+  "GRABBED",
+  "GRANDMA",
+  "GRANDPA",
+  "GRANTED",
+  "GREATER",
+  "GROWING",
+  "GUNSHOT",
+  "HANGING",
+  "HAPPENS",
+  "HEADING",
+  "HEALTHY",
+  "HEARING",
+  "HEAVENS",
+  "HEAVILY",
+  "HELPFUL",
+  "HELPING",
+  "HERSELF",
+  "HIGHEST",
+  "HIGHWAY",
+  "HIMSELF",
+  "HISTORY",
+  "HITTING",
+  "HOLDING",
+  "HOLIDAY",
+  "HOWEVER",
+  "HUMMING",
+  "HUNDRED",
+  "HUNTING",
+  "HURTING",
+  "HUSBAND",
+  "ILLEGAL",
+  "IMAGINE",
+  "INJURED",
+  "INSTEAD",
+  "INTENSE",
+  "INVITED",
+  "JEALOUS",
+  "JOINING",
+  "JOURNEY",
+  "JUMPING",
+  "JUSTICE",
+  "KEEPING",
+  "KICKING",
+  "KIDDING",
+  "KILLING",
+  "KINGDOM",
+  "KISSING",
+  "KITCHEN",
+  "KNOCKED",
+  "KNOWING",
+  "LANDING",
+  "LAUNDRY",
+  "LAWYERS",
+  "LEADING",
+  "LEARNED",
+  "LEAVING",
+  "LESSONS",
+  "LETTERS",
+  "LETTING",
+  "LIBERTY",
+  "LIBRARY",
+  "LICENSE",
+  "LOOKING",
+  "LOYALTY",
+  "MACHINE",
+  "MAJESTY",
+  "MANAGED",
+  "MANAGER",
+  "MARRIED",
+  "MASSIVE",
+  "MATCHES",
+  "MATTERS",
+  "MEANING",
+  "MEDICAL",
+  "MEETING",
+  "MEMBERS",
+  "MENTION",
+  "MESSAGE",
+  "MESSING",
+  "MILLION",
+  "MINUTES",
+  "MIRACLE",
+  "MISSING",
+  "MISSION",
+  "MISTAKE",
+  "MOANING",
+  "MOMENTS",
+  "MONITOR",
+  "MONSTER",
+  "MORNING",
+  "MURDERS",
+  "MYSTERY",
+  "NATURAL",
+  "NAUGHTY",
+  "NEITHER",
+  "NERVOUS",
+  "NETWORK",
+  "NOTHING",
+  "NOTICED",
+  "NOWHERE",
+  "NUCLEAR",
+  "NUMBERS",
+  "OBVIOUS",
+  "OFFENSE",
+  "OFFERED",
+  "OFFICER",
+  "OPENING",
+  "OPINION",
+  "OPTIONS",
+  "ORDERED",
+  "OUTSIDE",
+  "PACKAGE",
+  "PAINFUL",
+  "PAINTED",
+  "PANTING",
+  "PARENTS",
+  "PARKING",
+  "PARTIES",
+  "PARTNER",
+  "PASSING",
+  "PASSION",
+  "PATIENT",
+  "PATTERN",
+  "PERCENT",
+  "PERFECT",
+  "PERFORM",
+  "PERHAPS",
+  "PICKING",
+  "PICTURE",
+  "PLANNED",
+  "PLASTIC",
+  "PLAYERS",
+  "PLAYING",
+  "PLEASED",
+  "POPULAR",
+  "PREPARE",
+  "PRESENT",
+  "PRETEND",
+  "PREVENT",
+  "PRIVATE",
+  "PROBLEM",
+  "PROCEED",
+  "PROCESS",
+  "PRODUCE",
+  "PRODUCT",
+  "PROFILE",
+  "PROGRAM",
+  "PROJECT",
+  "PROMISE",
+  "PROPOSE",
+  "PROTECT",
+  "PROVIDE",
+  "PULLING",
+  "PURPOSE",
+  "PUSHING",
+  "PUTTING",
+  "QUALITY",
+  "QUARTER",
+  "QUICKLY",
+  "QUIETLY",
+  "REACHED",
+  "READING",
+  "REALISE",
+  "REALITY",
+  "REALIZE",
+  "REASONS",
+  "RECEIVE",
+  "RECORDS",
+  "REFUSED",
+  "REGULAR",
+  "RELATED",
+  "RELEASE",
+  "REMAINS",
+  "REMINDS",
+  "REMOVED",
+  "REPLACE",
+  "REPORTS",
+  "REQUEST",
+  "RESPECT",
+  "RESPOND",
+  "RESULTS",
+  "REVENGE",
+  "RINGING",
+  "ROBBERY",
+  "ROLLING",
+  "ROMANCE",
+  "ROUTINE",
+  "RUBBISH",
+  "RUNNING",
+  "SCHOOLS",
+  "SCIENCE",
+  "SCRATCH",
+  "SCREAMS",
+  "SECONDS",
+  "SECRETS",
+  "SECTION",
+  "SELFISH",
+  "SELLING",
+  "SENATOR",
+  "SENDING",
+  "SERIOUS",
+  "SERVANT",
+  "SERVICE",
+  "SERVING",
+  "SESSION",
+  "SETTING",
+  "SETTLED",
+  "SEVERAL",
+  "SHARING",
+  "SHELTER",
+  "SHERIFF",
+  "SHOCKED",
+  "SHOWING",
+  "SILENCE",
+  "SIMILAR",
+  "SINGING",
+  "SISTERS",
+  "SITTING",
+  "SLIPPED",
+  "SMALLER",
+  "SMILING",
+  "SMOKING",
+  "SOBBING",
+  "SOCIETY",
+  "SOLDIER",
+  "SOMEDAY",
+  "SOMEHOW",
+  "SOMEONE",
+  "SOUNDED",
+  "SPECIAL",
+  "SPECIES",
+  "SPIRITS",
+  "STABBED",
+  "STARING",
+  "STARTED",
+  "STATION",
+  "STAYING",
+  "STOMACH",
+  "STOPPED",
+  "STORIES",
+  "STRANGE",
+  "STREETS",
+  "STRETCH",
+  "STUDENT",
+  "STUDIED",
+  "STUDIES",
+  "SUBJECT",
+  "SUCCEED",
+  "SUCCESS",
+  "SUGGEST",
+  "SUICIDE",
+  "SUPPORT",
+  "SUPPOSE",
+  "SURFACE",
+  "SURGEON",
+  "SURGERY",
+  "SURVIVE",
+  "SUSPECT",
+  "SWEETIE",
+  "SYSTEMS",
+  "TALKING",
+  "TEACHER",
+  "TELLING",
+  "TESTIFY",
+  "TESTING",
+  "THEATER",
+  "THEATRE",
+  "THERAPY",
+  "THIEVES",
+  "THIRSTY",
+  "THOUGHT",
+  "THROUGH",
+  "THUNDER",
+  "TICKETS",
+  "TONIGHT",
+  "TORTURE",
+  "TOTALLY",
+  "TOUCHED",
+  "TOWARDS",
+  "TRAFFIC",
+  "TRAGEDY",
+  "TRAINED",
+  "TRAITOR",
+  "TRAPPED",
+  "TREATED",
+  "TRIGGER",
+  "TROUBLE",
+  "TRUSTED",
+  "TURNING",
+  "TYPICAL",
+  "UNHAPPY",
+  "UNIFORM",
+  "UNKNOWN",
+  "UNUSUAL",
+  "USELESS",
+  "USUALLY",
+  "VAMPIRE",
+  "VEHICLE",
+  "VERSION",
+  "VICTIMS",
+  "VICTORY",
+  "VILLAGE",
+  "VIOLENT",
+  "WAILING",
+  "WAITING",
+  "WALKING",
+  "WANTING",
+  "WARNING",
+  "WARRANT",
+  "WARRIOR",
+  "WASTING",
+  "WATCHED",
+  "WEAPONS",
+  "WEARING",
+  "WEATHER",
+  "WEDDING",
+  "WEEKEND",
+  "WELCOME",
+  "WESTERN",
+  "WHETHER",
+  "WHISKEY",
+  "WHISTLE",
+  "WHOEVER",
+  "WILLING",
+  "WINDOWS",
+  "WINNING",
+  "WITHOUT",
+  "WITNESS",
+  "WORKERS",
+  "WORKING",
+  "WORRIED",
+  "WORRIES",
+  "WOUNDED",
+  "WRITING",
+  "WRITTEN",
+  "YELLING",
+  "YOUNGER",
+
+  // === 8-letter words ===
+  "ACCEPTED",
+  "ACCIDENT",
+  "ACTUALLY",
+  "ALTHOUGH",
+  "ANYTHING",
+  "ANYWHERE",
+  "APPLAUSE",
+  "APPROACH",
+  "ARRANGED",
+  "ARRESTED",
+  "ATTACKED",
+  "ATTITUDE",
+  "ATTORNEY",
+  "AUDIENCE",
+  "BASEBALL",
+  "BASEMENT",
+  "BASTARDS",
+  "BATHROOM",
+  "BECOMING",
+  "BEHAVIOR",
+  "BELIEVED",
+  "BELIEVES",
+  "BETRAYED",
+  "BIRTHDAY",
+  "BLEEDING",
+  "BREAKING",
+  "BRINGING",
+  "BROTHERS",
+  "BUILDING",
+  "BUSINESS",
+  "CAMPAIGN",
+  "CARRYING",
+  "CEREMONY",
+  "CHAMPION",
+  "CHANGING",
+  "CHARMING",
+  "CHEATING",
+  "CHECKING",
+  "CHEERING",
+  "CHILDREN",
+  "CHUCKLES",
+  "CLEANING",
+  "COMPLETE",
+  "COMPUTER",
+  "CONFUSED",
+  "CONSIDER",
+  "CONTINUE",
+  "CONTRACT",
+  "CONVINCE",
+  "COUGHING",
+  "COUNTING",
+  "CREATURE",
+  "CRIMINAL",
+  "CUSTOMER",
+  "DARKNESS",
+  "DAUGHTER",
+  "DECISION",
+  "DELIVERY",
+  "DESCRIBE",
+  "DESERVES",
+  "DESIGNED",
+  "DIRECTLY",
+  "DIRECTOR",
+  "DISASTER",
+  "DISTANCE",
+  "DISTRICT",
+  "DIVISION",
+  "DRAMATIC",
+  "DREAMING",
+  "DRINKING",
+  "ELEVATOR",
+  "ENJOYING",
+  "ENTIRELY",
+  "ENTRANCE",
+  "EVERYONE",
+  "EVIDENCE",
+  "EXCHANGE",
+  "EXCITING",
+  "EXERCISE",
+  "EXPECTED",
+  "FAMILIAR",
+  "FAMILIES",
+  "FAVORITE",
+  "FEELINGS",
+  "FIGHTING",
+  "FINISHED",
+  "FOLLOWED",
+  "FOOTBALL",
+  "FRIENDLY",
+  "GOODNESS",
+  "GORGEOUS",
+  "GOVERNOR",
+  "GRATEFUL",
+  "GREATEST",
+  "GROANING",
+  "GROWLING",
+  "GRUNTING",
+  "HANDSOME",
+  "HAPPENED",
+  "HIGHNESS",
+  "HOMEWORK",
+  "HONESTLY",
+  "HORRIBLE",
+  "HOSPITAL",
+  "HUNDREDS",
+  "IDENTITY",
+  "INCIDENT",
+  "INDUSTRY",
+  "INNOCENT",
+  "INTEREST",
+  "INVOLVED",
+  "KNOCKING",
+  "LANGUAGE",
+  "LAUGHING",
+  "LAUGHTER",
+  "LEARNING",
+  "LIFETIME",
+  "LOCATION",
+  "MAGAZINE",
+  "MARRIAGE",
+  "MATERIAL",
+  "MEDICINE",
+  "MEMORIES",
+  "MESSAGES",
+  "MIDNIGHT",
+  "MILITARY",
+  "MILLIONS",
+  "MINISTER",
+  "MISTAKES",
+  "MONSIEUR",
+  "MOUNTAIN",
+  "MOVEMENT",
+  "MURDERED",
+  "MURDERER",
+  "NARRATOR",
+  "NATIONAL",
+  "NEGATIVE",
+  "NEIGHBOR",
+  "NONSENSE",
+  "NORMALLY",
+  "OFFERING",
+  "OFFICERS",
+  "OFFICIAL",
+  "OPPOSITE",
+  "ORDINARY",
+  "ORIGINAL",
+  "PAINTING",
+  "PARTNERS",
+  "PATHETIC",
+  "PATIENTS",
+  "PERSONAL",
+  "PHYSICAL",
+  "PICTURES",
+  "PLANNING",
+  "PLEASURE",
+  "POLITICS",
+  "POSITION",
+  "POSITIVE",
+  "POSSIBLE",
+  "POSSIBLY",
+  "POWERFUL",
+  "PRACTICE",
+  "PRECIOUS",
+  "PREGNANT",
+  "PREPARED",
+  "PRESENCE",
+  "PRESSURE",
+  "PRINCESS",
+  "PRISONER",
+  "PROBABLY",
+  "PROBLEMS",
+  "PROGRESS",
+  "PROMISED",
+  "PROPERLY",
+  "PROPERTY",
+  "QUESTION",
+  "REACTION",
+  "REALIZED",
+  "RECEIVED",
+  "RECENTLY",
+  "RELEASED",
+  "RELIGION",
+  "REMEMBER",
+  "REPORTED",
+  "REPORTER",
+  "RESEARCH",
+  "RETURNED",
+  "ROMANTIC",
+  "SANDWICH",
+  "SCHEDULE",
+  "SECURITY",
+  "SENTENCE",
+  "SEPARATE",
+  "SERGEANT",
+  "SERVICES",
+  "SHOOTING",
+  "SHOPPING",
+  "SHOULDER",
+  "SHOUTING",
+  "SLEEPING",
+  "SOLDIERS",
+  "SOLUTION",
+  "SOMEBODY",
+  "SOMETIME",
+  "SPEAKING",
+  "SPECIFIC",
+  "SPENDING",
+  "STANDARD",
+  "STANDING",
+  "STARTING",
+  "STEALING",
+  "STOPPING",
+  "STRAIGHT",
+  "STRANGER",
+  "STRENGTH",
+  "STRONGER",
+  "STRUGGLE",
+  "STUDENTS",
+  "STUDYING",
+  "SUDDENLY",
+  "SUFFERED",
+  "SUPPOSED",
+  "SURPRISE",
+  "SURVIVED",
+  "SWIMMING",
+  "TEACHING",
+  "TERRIBLE",
+  "TERRIBLY",
+  "TERRIFIC",
+  "THINKING",
+  "THOUGHTS",
+  "THOUSAND",
+  "THROWING",
+  "TOGETHER",
+  "TOMORROW",
+  "TOUCHING",
+  "TRAINING",
+  "TRANSFER",
+  "TREASURE",
+  "UNIVERSE",
+  "UPSTAIRS",
+  "VACATION",
+  "VALUABLE",
+  "VIOLENCE",
+  "WATCHING",
+  "WHATEVER",
+  "WHENEVER",
+  "WHEREVER",
+  "YOURSELF"
+]);
+
+// ── Mulberry32 PRNG (deterministic) ────────────────────────
+function mulberry32(seed) {
+  return function() {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+function getDailySeed() {
+  const d = new Date();
+  return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+}
+
+function getTodayString() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+// Day number since an arbitrary epoch for display
+function getDayNumber() {
+  const epoch = new Date(2026, 0, 1);
+  const now = new Date();
+  now.setHours(0,0,0,0);
+  return Math.floor((now - epoch) / 86400000) + 1;
+}
+
+// ── Persistence ────────────────────────────────────────────
+const STORAGE = {
+  get(key) { try { return localStorage.getItem('gamelab_worddrops_' + key); } catch { return null; } },
+  set(key, val) { try { localStorage.setItem('gamelab_worddrops_' + key, val); } catch {} },
+  getJSON(key) { try { return JSON.parse(this.get(key)); } catch { return null; } },
+  setJSON(key, val) { this.set(key, JSON.stringify(val)); }
+};
+
+function loadStats() {
+  return {
+    dailyStreak: parseInt(STORAGE.get('daily_streak')) || 0,
+    dailyLastPlayed: STORAGE.get('daily_last_played') || '',
+    dailyBestScore: parseInt(STORAGE.get('daily_best_score')) || 0,
+    dailyTodayResult: STORAGE.getJSON('daily_today_result'),
+    freeplayBestScore: parseInt(STORAGE.get('freeplay_best_score')) || 0,
+    freeplayGamesPlayed: parseInt(STORAGE.get('freeplay_games_played')) || 0,
+  };
+}
+
+function saveDailyResult(result) {
+  const today = getTodayString();
+  const stats = loadStats();
+
+  // Update streak
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth()+1).padStart(2,'0')}-${String(yesterday.getDate()).padStart(2,'0')}`;
+
+  let newStreak;
+  if (stats.dailyLastPlayed === yStr) {
+    newStreak = stats.dailyStreak + 1;
+  } else if (stats.dailyLastPlayed === today) {
+    newStreak = stats.dailyStreak; // already played today
+  } else {
+    newStreak = 1; // streak broken or first play
+  }
+
+  STORAGE.set('daily_streak', newStreak);
+  STORAGE.set('daily_last_played', today);
+  if (result.score > stats.dailyBestScore) {
+    STORAGE.set('daily_best_score', result.score);
+  }
+  STORAGE.setJSON('daily_today_result', result);
+}
+
+function saveFreeplayResult(score) {
+  const stats = loadStats();
+  STORAGE.set('freeplay_games_played', stats.freeplayGamesPlayed + 1);
+  if (score > stats.freeplayBestScore) {
+    STORAGE.set('freeplay_best_score', score);
+  }
+}
+
+// ── Scoring ────────────────────────────────────────────────
+const LENGTH_MULTIPLIER = { 3: 1, 4: 2, 5: 4, 6: 8, 7: 16, 8: 32 };
+function getWordScore(word, chainLength) {
+  let base = 0;
+  for (let ch of word) base += LETTER_POOL[ch].pts;
+  const lenMult = LENGTH_MULTIPLIER[Math.min(word.length, 8)] || 32;
+  const chainMult = chainLength > 0 ? Math.pow(1.5, chainLength) : 1;
+  return Math.floor(base * lenMult * chainMult);
+}
+
+// ── Game State ─────────────────────────────────────────────
+// States: 'menu' | 'mode_select' | 'playing' | 'paused' | 'game_over'
+
+// Daily mode is a complete, working mode (3-minute seeded score-attack, streaks, shareable
+// results, board-full end, deterministic per-day puzzle). It is intentionally DISABLED for
+// publication so the game is pure Freeplay arcade. To bring it back, flip this to true: that
+// re-enables the mode-select screen, the "Two ways to play" how-to section, and all Daily code
+// below (initDaily, placeDailyLetter, the daily timer/RNG/results — none of it was deleted).
+const DAILY_ENABLED = false;
+
+let state = (STORAGE.get('seen_howto') === '1') ? 'menu' : 'howto';
+let gameMode = null; // 'daily' | 'freeplay'
+
+// Menu / how-to "start" routing: with Daily off, skip the (now single-option) mode-select
+// screen and drop straight into Freeplay.
+function startFromMenu() {
+  if (DAILY_ENABLED) { state = 'mode_select'; }
+  else { initFreeplay(); }
+}
+
+// Board
+let board = [];
+let highlightedWords = []; // [{word, cells, direction, glowPhase}]
+
+// Freeplay state
+let currentLetter = '';
+let letterX = 0;
+let letterY = 0;
+let nextLetters = [];
+let heldLetter = null;
+let canHold = true;
+let dropTimer = 0;
+let dropInterval = 1000; // Freeplay: ms between auto-drops; starts calm, ramps down gently as words are cleared
+
+// Daily state
+let dailyLetter = '';
+let dailyRNG = null;
+let dailyLetterIndex = 0;
+let dailyTimer = 180; // 3 minutes in seconds
+let dailyTimerActive = false;
+let dailyStarted = false;
+let dailyQueue = []; // upcoming letters visible to player
+const DAILY_QUEUE_SIZE = 5;
+
+// Shared game state
+let scoreVal = 0;
+let displayScore = 0; // tweened value shown in the HUD, counts up toward scoreVal
+let wordsFound = 0;
+let chainCount = 0;
+let bestWord = '';
+let bestWordScore = 0;
+let wordHistory = [];
+let totalLettersPlaced = 0;
+let particles = [];
+let level = 1;
+let longestWord = '';
+let bestChain = 0;
+
+// Animation
+let lastTime = 0;
+let glowTime = 0;
+let clearingAnimation = false; // true when a word clear animation is in progress
+let menuPulse = 0;
+
+// "Not a word" feedback
+let notWordFeedback = null; // { x, y, timer }
+
+// Touch state
+let touchStartX = 0;
+let touchStartY = 0;
+let touchStartTime = 0;
+let hoveredCol = -1; // for daily mode column highlight
+
+// ── Board Helpers ──────────────────────────────────────────
+function createBoard() {
+  board = [];
+  for (let r = 0; r < ROWS; r++) {
+    board[r] = [];
+    for (let c = 0; c < COLS; c++) board[r][c] = null;
+  }
+}
+
+function applyGravity() {
+  let moved = false;
+  for (let c = 0; c < COLS; c++) {
+    let write = ROWS - 1;
+    for (let r = ROWS - 1; r >= 0; r--) {
+      if (board[r][c] !== null) {
+        if (write !== r) {
+          board[write][c] = board[r][c];
+          board[r][c] = null;
+          moved = true;
+        }
+        write--;
+      }
+    }
+    for (let r = write; r >= 0; r--) board[r][c] = null;
+  }
+  return moved;
+}
+
+// ── Word Detection (scan board, return all valid words) ────
+function scanBoard() {
+  let found = [];
+
+  // Horizontal (left to right)
+  for (let r = 0; r < ROWS; r++) {
+    for (let startC = 0; startC < COLS - 2; startC++) {
+      if (board[r][startC] === null) continue;
+      let word = '';
+      let cells = [];
+      for (let c = startC; c < COLS && board[r][c] !== null; c++) {
+        word += board[r][c];
+        cells.push({ r, c });
+        if (word.length >= 3 && DICTIONARY.has(word)) {
+          found.push({ word, cells: [...cells], direction: 'h' });
+        }
+      }
+    }
+  }
+
+  // Vertical (top to bottom)
+  for (let c = 0; c < COLS; c++) {
+    for (let startR = 0; startR < ROWS - 2; startR++) {
+      if (board[startR][c] === null) continue;
+      let word = '';
+      let cells = [];
+      for (let r = startR; r < ROWS && board[r][c] !== null; r++) {
+        word += board[r][c];
+        cells.push({ r, c });
+        if (word.length >= 3 && DICTIONARY.has(word)) {
+          found.push({ word, cells: [...cells], direction: 'v' });
+        }
+      }
+    }
+  }
+
+  return found;
+}
+
+// Track known highlighted words so we only play sound/flash for NEW discoveries
+let knownHighlightKeys = new Set();
+
+function makeWordKey(w) {
+  return w.word + ':' + w.cells.map(c => c.r + ',' + c.c).join(';');
+}
+
+function setHighlights(found) {
+  const newKeys = new Set(found.map(makeWordKey));
+  let hasNew = false;
+  highlightedWords = found.map(w => {
+    const key = makeWordKey(w);
+    const isNew = !knownHighlightKeys.has(key);
+    if (isNew) hasNew = true;
+    return { ...w, glowPhase: 0, isNew, discoveryTimer: isNew ? 1.0 : 0 };
+  });
+  knownHighlightKeys = newKeys;
+  if (hasNew && found.length > 0 && typeof sfxWordHighlight === 'function') sfxWordHighlight();
+}
+
+function updateHighlights() {
+  const found = scanBoard();
+  setHighlights(found);
+}
+
+// ── Clear a specific word ──────────────────────────────────
+function clearWord(wordObj) {
+  if (clearingAnimation) return;
+  clearingAnimation = true;
+
+  const wordScore = getWordScore(wordObj.word, chainCount);
+  scoreVal += wordScore;
+  wordsFound++;
+
+  if (wordObj.word.length > longestWord.length) longestWord = wordObj.word;
+  if (wordScore > bestWordScore) { bestWordScore = wordScore; bestWord = wordObj.word; }
+  if (chainCount > bestChain) bestChain = chainCount;
+
+  wordHistory.unshift({ word: wordObj.word, score: wordScore });
+  if (wordHistory.length > 15) wordHistory.pop();
+
+  // Show popup
+  showWordPopup(wordObj.word, wordScore, wordObj.cells[0]);
+  sfxWordClear(wordObj.word.length, chainCount);
+  triggerReleaseAmbient();
+
+  // Screen shake scaled by word length and chain depth (§3.2): short non-chained clears
+  // don't shake; long words and deep chains hit hard.
+  const shakeIntensity = Math.max(0, (wordObj.word.length - 4) * 0.4) + chainCount * 0.3;
+  if (shakeIntensity > 0.15) triggerShake(0.5 + shakeIntensity);
+
+  // Particles + clear cells
+  for (let cell of wordObj.cells) {
+    let letter = board[cell.r][cell.c];
+    if (letter) spawnParticles(cell.r, cell.c, getLetterColor(letter));
+    board[cell.r][cell.c] = null;
+  }
+
+  // After a short delay: gravity, re-scan, chain check
+  setTimeout(() => {
+    applyGravity();
+
+    // Re-scan for chain
+    const newWords = scanBoard();
+    if (newWords.length > 0) {
+      chainCount++;
+      if (chainCount > bestChain) bestChain = chainCount;
+      setHighlights(newWords);
+      if (typeof sfxChainContinue === 'function') sfxChainContinue(chainCount);
+    } else {
+      chainCount = 0;
+      highlightedWords = [];
+      knownHighlightKeys = new Set();
+      // After chain ends, do a fresh scan (in case letters settled into new words)
+      updateHighlights();
+    }
+
+    clearingAnimation = false;
+
+    // A clear can be the last possible action on a full Daily board — re-check for jam.
+    checkDailyJam();
+
+    // Level up in freeplay
+    if (gameMode === 'freeplay' && wordsFound > 0 && wordsFound % 10 === 0) {
+      level = Math.floor(wordsFound / 10) + 1;
+      dropInterval = Math.max(400, 1000 - (level - 1) * 40);
+      sfxLevelUp();
+    }
+  }, 250);
+}
+
+// ── Hit test: which highlighted word was tapped? ───────────
+function getWordAtCell(r, c) {
+  // Prefer longer words when multiple occupy same cell
+  let best = null;
+  for (let hw of highlightedWords) {
+    for (let cell of hw.cells) {
+      if (cell.r === r && cell.c === c) {
+        if (!best || hw.word.length > best.word.length) best = hw;
+      }
+    }
+  }
+  return best;
+}
+
+// ── Particles & Effects ────────────────────────────────────
+function spawnParticles(r, c, color) {
+  for (let i = 0; i < 6; i++) {
+    particles.push({
+      x: PADDING_X + c * CELL + CELL / 2,
+      y: PADDING_Y + r * CELL + CELL / 2,
+      vx: (Math.random() - 0.5) * 120,
+      vy: (Math.random() - 0.5) * 120 - 30,
+      life: 0.6 + Math.random() * 0.3,
+      color, size: 3 + Math.random() * 3
+    });
+  }
+}
+
+// intensity ~0.5 (small word) .. ~2.2 (long word + deep chain). Restarts the CSS animation
+// even on rapid consecutive clears via a forced reflow.
+function triggerShake(intensity = 1) {
+  const shk = Math.max(0.4, Math.min(2.2, intensity));
+  canvas.classList.remove('shake');
+  void canvas.offsetWidth;
+  canvas.style.setProperty('--shk', shk.toFixed(2));
+  canvas.classList.add('shake');
+  clearTimeout(triggerShake._t);
+  triggerShake._t = setTimeout(() => canvas.classList.remove('shake'), 420);
+}
+
+function showWordPopup(word, score, cell) {
+  let popup = document.createElement('div');
+  popup.className = 'word-popup';
+  popup.textContent = `${word} +${score}`;
+  let rect = canvas.getBoundingClientRect();
+  popup.style.left = (rect.left + PADDING_X + cell.c * CELL) + 'px';
+  popup.style.top = (rect.top + PADDING_Y + cell.r * CELL) + 'px';
+  document.body.appendChild(popup);
+  setTimeout(() => popup.remove(), 1500);
+}
+
+// ── Random Letter (mode-aware) ─────────────────────────────
+// Anti-drought dealing (§4.2): draws stay frequency-weighted, but we cap same-class streaks.
+// A pure random stream strands players in consonant deserts by variance. Vowels are capped
+// tighter (floods aren't useful for building words) while consonant runs are allowed to go
+// longer for challenge. Freeplay only; tune the caps to taste.
+const VOWELS = new Set(['A', 'E', 'I', 'O', 'U']);
+const MAX_VOWEL_RUN = 3;
+const MAX_CONSONANT_RUN = 6;
+let letterRun = 0;          // length of the current same-class streak
+let letterRunIsVowel = null;
+
+function resetLetterRun() { letterRun = 0; letterRunIsVowel = null; }
+
+// Frequency-weighted pick, optionally restricted to one class.
+function weightedLetter(forceVowel, forceConsonant) {
+  let ch;
+  do {
+    ch = LETTERS[Math.floor(Math.random() * LETTERS.length)];
+  } while ((forceVowel && !VOWELS.has(ch)) || (forceConsonant && VOWELS.has(ch)));
+  return ch;
+}
+
+function randomLetter() {
+  let forceVowel = false, forceConsonant = false;
+  if (letterRunIsVowel === true && letterRun >= MAX_VOWEL_RUN) forceConsonant = true;
+  else if (letterRunIsVowel === false && letterRun >= MAX_CONSONANT_RUN) forceVowel = true;
+  const ch = weightedLetter(forceVowel, forceConsonant);
+  const isV = VOWELS.has(ch);
+  if (isV === letterRunIsVowel) letterRun++;
+  else { letterRunIsVowel = isV; letterRun = 1; }
+  return ch;
+}
+
+// Daily uses the plain seeded stream (mode currently disabled; see DAILY_ENABLED). If Daily is
+// ever re-enabled, applying the same cap here would need per-run state reset to stay deterministic.
+function dailyRandomLetter() {
+  if (!dailyRNG) return randomLetter();
+  return LETTERS[Math.floor(dailyRNG() * LETTERS.length)];
+}
+
+// ── Game Init ──────────────────────────────────────────────
+function initFreeplay() {
+  gameMode = 'freeplay';
+  state = 'playing';
+  createBoard();
+  highlightedWords = [];
+  knownHighlightKeys = new Set();
+  scoreVal = 0; displayScore = 0; wordsFound = 0; chainCount = 0;
+  bestWord = ''; bestWordScore = 0; longestWord = '';
+  bestChain = 0; wordHistory = []; totalLettersPlaced = 0;
+  particles = []; level = 1; dropInterval = 1000;
+  heldLetter = null; canHold = true;
+  clearingAnimation = false;
+
+  resetLetterRun();
+  nextLetters = [randomLetter(), randomLetter(), randomLetter()];
+  spawnFreeplayLetter();
+
+  unlockAudio();
+  WD_AMBIENT.start();
+  updateAmbientFromBoard();
+
+  lastTime = performance.now();
+  requestAnimationFrame(gameLoop);
+}
+
+function spawnFreeplayLetter() {
+  currentLetter = nextLetters.shift();
+  nextLetters.push(randomLetter());
+  letterX = Math.floor(COLS / 2);
+  letterY = 0;
+  canHold = true;
+
+  if (board[0][letterX] !== null) {
+    endGame();
+  }
+}
+
+function initDaily() {
+  const stats = loadStats();
+  const today = getTodayString();
+
+  // Already played today?
+  if (stats.dailyTodayResult && stats.dailyLastPlayed === today) {
+    // Show results directly
+    showDailyResults(stats.dailyTodayResult, stats.dailyStreak);
+    return;
+  }
+
+  gameMode = 'daily';
+  state = 'playing';
+  createBoard();
+  highlightedWords = [];
+  scoreVal = 0; displayScore = 0; wordsFound = 0; chainCount = 0;
+  bestWord = ''; bestWordScore = 0; longestWord = '';
+  bestChain = 0; wordHistory = []; totalLettersPlaced = 0;
+  particles = []; clearingAnimation = false;
+
+  dailyRNG = mulberry32(getDailySeed());
+  dailyLetterIndex = 0;
+  dailyTimer = 180;
+  dailyTimerActive = false;
+  dailyStarted = false;
+  dailyLetter = dailyRandomLetter();
+  dailyQueue = [];
+  for (let i = 0; i < DAILY_QUEUE_SIZE; i++) dailyQueue.push(dailyRandomLetter());
+
+  knownHighlightKeys = new Set();
+  unlockAudio();
+  WD_AMBIENT.start();
+  updateAmbientFromBoard();
+
+  lastTime = performance.now();
+  requestAnimationFrame(gameLoop);
+}
+
+// ── Place letter (Daily mode) ──────────────────────────────
+function placeDailyLetter(col) {
+  if (clearingAnimation) return;
+  if (col < 0 || col >= COLS) return;
+
+  // Find lowest empty cell in column
+  let targetRow = -1;
+  for (let r = ROWS - 1; r >= 0; r--) {
+    if (board[r][col] === null) { targetRow = r; break; }
+  }
+  if (targetRow === -1) return; // column full
+
+  // Start timer on first placement
+  if (!dailyTimerActive) {
+    dailyTimerActive = true;
+    dailyStarted = true;
+  }
+
+  board[targetRow][col] = dailyLetter;
+  totalLettersPlaced++;
+  sfxLetterLand(col);
+
+  // Advance letter queue
+  dailyLetterIndex++;
+  dailyLetter = dailyQueue.shift();
+  dailyQueue.push(dailyRandomLetter());
+
+  // Scan for words
+  updateHighlights();
+
+  // Daily can jam: if that placement filled the board and nothing is left to clear, the
+  // player can't act while the clock runs — end the run cleanly instead of a silent stall.
+  checkDailyJam();
+}
+
+// True when no cell is empty anywhere — no column can accept a dropped letter.
+function isBoardFull() {
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++)
+      if (board[r][c] === null) return false;
+  return true;
+}
+
+// End a Daily run only when the board is full AND there are no glowing words left to clear
+// (clearing a word opens space — that's the built-in relief, so we don't cut it short).
+function checkDailyJam() {
+  if (gameMode === 'daily' && state === 'playing' && !clearingAnimation
+      && highlightedWords.length === 0 && isBoardFull()) {
+    endGame('boardfull');
+  }
+}
+
+// ── Place letter (Freeplay mode) ───────────────────────────
+function placeFreeplayLetter() {
+  if (clearingAnimation) return;
+
+  board[letterY][letterX] = currentLetter;
+  totalLettersPlaced++;
+  sfxLetterLand(letterX);
+
+  // Scan for words
+  updateHighlights();
+
+  spawnFreeplayLetter();
+}
+
+// ── Hold Letter (Freeplay) ─────────────────────────────────
+function holdLetter() {
+  if (!canHold || state !== 'playing' || gameMode !== 'freeplay') return;
+  canHold = false;
+
+  if (heldLetter) {
+    let temp = heldLetter;
+    heldLetter = currentLetter;
+    currentLetter = temp;
+    letterY = 0;
+    letterX = Math.floor(COLS / 2);
+  } else {
+    heldLetter = currentLetter;
+    spawnFreeplayLetter();
+  }
+}
+
+// ── End Game ───────────────────────────────────────────────
+// reason: 'time' (Daily clock ran out) | 'boardfull' (Daily jammed) | undefined (Freeplay top-out)
+function endGame(reason) {
+  state = 'game_over';
+  WD_AMBIENT.stop();
+
+  // Check for personal best before saving (so we can compare)
+  const stats = loadStats();
+  const isPB = (gameMode === 'daily' && scoreVal > stats.dailyBestScore) ||
+               (gameMode === 'freeplay' && scoreVal > stats.freeplayBestScore);
+
+  if (gameMode === 'daily') {
+    // Auto-clear all remaining highlighted words as final bonus
+    for (let hw of highlightedWords) {
+      const wordScore = getWordScore(hw.word, 0);
+      scoreVal += wordScore;
+      wordsFound++;
+      if (hw.word.length > longestWord.length) longestWord = hw.word;
+      for (let cell of hw.cells) {
+        if (board[cell.r][cell.c]) {
+          spawnParticles(cell.r, cell.c, getLetterColor(board[cell.r][cell.c]));
+          board[cell.r][cell.c] = null;
+        }
+      }
+    }
+    highlightedWords = [];
+
+    const result = {
+      score: scoreVal,
+      words: wordsFound,
+      longest: longestWord,
+      bestWord: bestWord,
+      bestWordScore: bestWordScore,
+      history: wordHistory.slice(0, 15),
+      bestChain: bestChain,
+      lettersPlaced: totalLettersPlaced,
+      endReason: reason || 'time',
+      played: true
+    };
+
+    saveDailyResult(result);
+    const stats = loadStats();
+    showDailyResults(result, stats.dailyStreak);
+  } else {
+    saveFreeplayResult(scoreVal);
+  }
+
+  if (isPB && scoreVal > 0) sfxPersonalBest();
+  else sfxGameOver();
+}
+
+function showDailyResults(result, streak) {
+  // Stored for drawing in game_over state
+  state = 'game_over';
+  gameMode = 'daily';
+  dailyResult = result;
+  dailyStreak = streak;
+}
+
+let dailyResult = null;
+let dailyStreak = 0;
+
+// ── Input Handling ─────────────────────────────────────────
+function getCellFromPos(x, y) {
+  const col = Math.floor((x - PADDING_X) / CELL);
+  const row = Math.floor((y - PADDING_Y) / CELL);
+  if (col < 0 || col >= COLS || row < 0 || row >= ROWS) return null;
+  return { r: row, c: col };
+}
+
+function getColumnFromX(x) {
+  const col = Math.floor((x - PADDING_X) / CELL);
+  if (col < 0 || col >= COLS) return -1;
+  return col;
+}
+
+// Touch handlers
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  const touch = e.touches[0];
+  const rect = canvas.getBoundingClientRect();
+  touchStartX = touch.clientX - rect.left;
+  touchStartY = touch.clientY - rect.top;
+  touchStartTime = performance.now();
+
+  if (state === 'playing' && gameMode === 'daily') {
+    hoveredCol = getColumnFromX(touchStartX);
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  const touch = e.touches[0];
+  const rect = canvas.getBoundingClientRect();
+  const x = touch.clientX - rect.left;
+
+  if (state === 'playing' && gameMode === 'daily') {
+    hoveredCol = getColumnFromX(x);
+  }
+
+  if (state === 'playing' && gameMode === 'freeplay') {
+    const y = touch.clientY - rect.top;
+    const dx = x - touchStartX;
+    const dy = y - touchStartY;
+
+    // Horizontal swipe: move piece
+    if (Math.abs(dx) > CELL * 0.6) {
+      if (dx > 0 && letterX < COLS - 1 && board[letterY][letterX + 1] === null) {
+        letterX++;
+        touchStartX = x;
+      } else if (dx < 0 && letterX > 0 && board[letterY][letterX - 1] === null) {
+        letterX--;
+        touchStartX = x;
+      }
+    }
+
+    // Vertical swipe down: soft drop
+    if (dy > CELL * 0.6) {
+      if (letterY + 1 < ROWS && board[letterY + 1][letterX] === null) {
+        letterY++;
+        touchStartY = y;
+        dropTimer = 0;
+      }
+    }
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  const elapsed = performance.now() - touchStartTime;
+
+  handleClick(touchStartX, touchStartY, elapsed < 300);
+  hoveredCol = -1;
+}, { passive: false });
+
+// Mouse handlers
+canvas.addEventListener('click', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  handleClick(e.clientX - rect.left, e.clientY - rect.top, true);
+});
+
+function handleClick(x, y, isTap) {
+  // Sound toggle — top-right corner, always active
+  const iconSize = 24;
+  const iconX = W - iconSize - 10;
+  const iconY = 4;
+  if (x >= iconX && x <= iconX + iconSize && y >= iconY && y <= iconY + iconSize) {
+    toggleSound();
+    return;
+  }
+
+  // Pause button — top-left, active during play or while paused. Generous hit region.
+  if ((state === 'playing' || state === 'paused') &&
+      x >= 2 && x <= PAUSE_BTN.x + PAUSE_BTN.s + 8 && y >= 0 && y <= PAUSE_BTN.y + PAUSE_BTN.s + 8) {
+    togglePause();
+    return;
+  }
+  // While paused, a tap anywhere else resumes.
+  if (state === 'paused') {
+    togglePause();
+    return;
+  }
+
+  if (state === 'howto') {
+    STORAGE.set('seen_howto', '1');
+    startFromMenu();
+    return;
+  }
+
+  if (state === 'menu') {
+    // How to Play button — must be checked before "tap anywhere to start"
+    const hb = getMenuHowToButton();
+    if (x >= hb.x && x <= hb.x + hb.w && y >= hb.y && y <= hb.y + hb.h) {
+      state = 'howto';
+      return;
+    }
+    startFromMenu();
+    return;
+  }
+
+  if (state === 'mode_select') {
+    handleModeSelectClick(x, y);
+    return;
+  }
+
+  if (state === 'game_over') {
+    handleGameOverClick(x, y);
+    return;
+  }
+
+  if (state !== 'playing') return;
+
+  // Check if clicking on a highlighted word
+  const cell = getCellFromPos(x, y);
+  if (cell && !clearingAnimation) {
+    const word = getWordAtCell(cell.r, cell.c);
+    if (word) {
+      clearWord(word);
+      return;
+    }
+    // Tapped an occupied tile that isn't part of a word.
+    if (board[cell.r] && board[cell.r][cell.c]) {
+      // Daily: you place letters by tapping empty column space and clear words by tapping
+      // the glow, so an occupied non-word tile is a mis-tap. Show "not a word" and STOP —
+      // falling through to placeDailyLetter was the double-action bug.
+      // Freeplay: a tap means hard-drop, so don't hijack it with word-attempt feedback;
+      // let it fall through to the hard-drop handler below.
+      if (gameMode === 'daily') {
+        notWordFeedback = { x: PADDING_X + cell.c * CELL + CELL / 2, y: PADDING_Y + cell.r * CELL, timer: 1.0 };
+        playNotWordSound();
+        return;
+      }
+    }
+  }
+
+  // Daily mode: tap column to place letter
+  if (gameMode === 'daily' && isTap) {
+    const col = getColumnFromX(x);
+    if (col >= 0) placeDailyLetter(col);
+  }
+
+  // Freeplay mode: tap for hard drop
+  if (gameMode === 'freeplay' && isTap) {
+    // Only hard drop if tap is on/near the board, not on a highlighted word
+    if (cell && !getWordAtCell(cell.r, cell.c)) {
+      while (letterY + 1 < ROWS && board[letterY + 1][letterX] === null) letterY++;
+      placeFreeplayLetter();
+      dropTimer = 0;
+    }
+  }
+}
+
+// ── Mode Select Button Positions ───────────────────────────
+function getModeSelectButtons() {
+  const cx = W / 2;
+  const cy = H / 2;
+  const btnW = Math.min(260, W - 60);
+  const btnH = 70;
+  const gap = 20;
+
+  return {
+    daily: { x: cx - btnW/2, y: cy - btnH - gap/2, w: btnW, h: btnH },
+    freeplay: { x: cx - btnW/2, y: cy + gap/2, w: btnW, h: btnH },
+  };
+}
+
+function handleModeSelectClick(x, y) {
+  const btns = getModeSelectButtons();
+  if (x >= btns.daily.x && x <= btns.daily.x + btns.daily.w &&
+      y >= btns.daily.y && y <= btns.daily.y + btns.daily.h) {
+    initDaily();
+  }
+  if (x >= btns.freeplay.x && x <= btns.freeplay.x + btns.freeplay.w &&
+      y >= btns.freeplay.y && y <= btns.freeplay.y + btns.freeplay.h) {
+    initFreeplay();
+  }
+}
+
+// Game Over buttons
+function getGameOverButtons() {
+  const cx = W / 2;
+  const btnW = Math.min(200, W - 80);
+  const btnH = 50;
+  const baseY = H / 2 + 120;
+  return {
+    playAgain: { x: cx - btnW/2, y: baseY, w: btnW, h: btnH },
+    menu: { x: cx - btnW/2, y: baseY + btnH + 15, w: btnW, h: btnH },
+    share: gameMode === 'daily' ? { x: cx - btnW/2, y: baseY + (btnH + 15) * 2, w: btnW, h: btnH } : null,
+  };
+}
+
+function handleGameOverClick(x, y) {
+  const btns = getGameOverButtons();
+  if (x >= btns.playAgain.x && x <= btns.playAgain.x + btns.playAgain.w &&
+      y >= btns.playAgain.y && y <= btns.playAgain.y + btns.playAgain.h) {
+    if (gameMode === 'daily') {
+      initDaily();
+    } else {
+      initFreeplay();
+    }
+  }
+  if (x >= btns.menu.x && x <= btns.menu.x + btns.menu.w &&
+      y >= btns.menu.y && y <= btns.menu.y + btns.menu.h) {
+    // With Daily off there's no mode picker — go to the title menu (which routes to Freeplay).
+    state = DAILY_ENABLED ? 'mode_select' : 'menu';
+  }
+  if (btns.share && x >= btns.share.x && x <= btns.share.x + btns.share.w &&
+      y >= btns.share.y && y <= btns.share.y + btns.share.h) {
+    copyShareText();
+  }
+}
+
+function copyShareText() {
+  if (!dailyResult) return;
+  const stats = loadStats();
+  const text = `WordDrops Daily #${getDayNumber()}\nScore: ${dailyResult.score.toLocaleString()}\nWords: ${dailyResult.words} | Longest: ${dailyResult.longest || 'N/A'}\nBest Chain: ${dailyResult.bestChain}x\nStreak: ${stats.dailyStreak} day${stats.dailyStreak !== 1 ? 's' : ''}`;
+  navigator.clipboard.writeText(text).catch(() => {});
+}
+
+// Keyboard
+document.addEventListener('keydown', (e) => {
+  if (state === 'howto') { STORAGE.set('seen_howto', '1'); startFromMenu(); return; }
+  if (state === 'menu') { startFromMenu(); return; }
+
+  // Pause works in both modes and toggles back from paused. Must come before the
+  // freeplay-only guard below.
+  if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') &&
+      (state === 'playing' || state === 'paused')) {
+    togglePause();
+    e.preventDefault();
+    return;
+  }
+
+  if (state !== 'playing' || gameMode !== 'freeplay') return;
+  if (clearingAnimation) return;
+
+  switch (e.key) {
+    case 'ArrowLeft':
+      if (letterX > 0 && board[letterY][letterX - 1] === null) letterX--;
+      e.preventDefault(); break;
+    case 'ArrowRight':
+      if (letterX < COLS - 1 && board[letterY][letterX + 1] === null) letterX++;
+      e.preventDefault(); break;
+    case 'ArrowDown':
+      if (letterY + 1 < ROWS && board[letterY + 1][letterX] === null) {
+        letterY++; dropTimer = 0;
+      }
+      e.preventDefault(); break;
+    case ' ':
+      e.preventDefault();
+      while (letterY + 1 < ROWS && board[letterY + 1][letterX] === null) letterY++;
+      placeFreeplayLetter(); dropTimer = 0;
+      break;
+    case 'c': case 'C':
+      holdLetter(); break;
+  }
+});
+
+// ── Drawing ────────────────────────────────────────────────
+function drawRoundedRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+function drawButton(btn, text, gradient1, gradient2, textColor) {
+  ctx.save();
+  // Glow shadow behind button
+  ctx.shadowColor = gradient1;
+  ctx.shadowBlur = 12;
+
+  const grad = ctx.createLinearGradient(btn.x, btn.y, btn.x + btn.w, btn.y + btn.h);
+  grad.addColorStop(0, gradient1);
+  grad.addColorStop(1, gradient2);
+  ctx.fillStyle = grad;
+  drawRoundedRect(btn.x, btn.y, btn.w, btn.h, 12);
+  ctx.fill();
+  ctx.restore();
+
+  ctx.fillStyle = textColor || '#fff';
+  ctx.font = 'bold 18px "Segoe UI", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, btn.x + btn.w/2, btn.y + btn.h/2);
+}
+
+// Falling menu tiles — generated once
+let menuTiles = [];
+function initMenuTiles() {
+  menuTiles = [];
+  const letters = 'WORDDROPSABCEFGHIJKLMNQTUVXYZ';
+  for (let i = 0; i < 10; i++) {
+    menuTiles.push({
+      letter: letters[Math.floor(Math.random() * letters.length)],
+      x: Math.random() * W,
+      y: Math.random() * H,
+      speed: 15 + Math.random() * 25,
+      alpha: 0.06 + Math.random() * 0.08,
+      size: 20 + Math.random() * 20
+    });
+  }
+}
+initMenuTiles();
+
+// ── How to Play (first run + reopenable from menu) ─────────
+function getHowToButton() {
+  const btnW = Math.min(200, W - 80), btnH = 50;
+  return { x: W / 2 - btnW / 2, y: Math.min(H - 74, H / 2 + 200), w: btnW, h: btnH };
+}
+
+function getMenuHowToButton() {
+  const w = 150, h = 34;
+  return { x: W / 2 - w / 2, y: (H / 2 - 40) + 150, w, h };
+}
+
+function drawHowToScreen() {
+  ctx.fillStyle = '#0c0c1a';
+  ctx.fillRect(0, 0, W, H);
+  const cx = W / 2;
+  const maxW = Math.min(360, W - 40);
+  const left = cx - maxW / 2;
+  let y = Math.max(56, H / 2 - 210);
+
+  ctx.save();
+  ctx.shadowColor = '#ffd93d';
+  ctx.shadowBlur = 14;
+  ctx.fillStyle = '#ffd93d';
+  ctx.font = 'bold 28px "Segoe UI", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('HOW TO PLAY', cx, y);
+  ctx.restore();
+  y += 42;
+
+  const section = (color, head, body) => {
+    ctx.textAlign = 'left';
+    ctx.fillStyle = color;
+    ctx.font = 'bold 15px "Segoe UI", sans-serif';
+    ctx.fillText(head, left, y);
+    y += 22;
+    ctx.fillStyle = '#aab';
+    ctx.font = '13px "Segoe UI", sans-serif';
+    for (const ln of body) { ctx.fillText(ln, left, y); y += 18; }
+    y += 12;
+  };
+
+  section('#6bcb77', 'Spell words', [
+    'Letters drop onto the board. Line up 3 or more',
+    'in a row or column to form a word.',
+  ]);
+  section('#ffd93d', 'Tap the glow to clear', [
+    'Valid words light up. Tap the glowing letters to',
+    'clear them and score. Longer words score big.',
+  ]);
+  section('#ff6b6b', 'Chain for more', [
+    'After a clear, letters fall and new words can',
+    'appear. Keep tapping them to build a chain,',
+    'and each link multiplies your score.',
+  ]);
+  if (DAILY_ENABLED) {
+    section('#4d96ff', 'Two ways to play', [
+      'Daily: tap a column to aim each drop. 3 minutes,',
+      'one shared puzzle a day.',
+      'Freeplay: letters fall on their own. Move with',
+      'arrows or swipe, drop with space or tap.',
+    ]);
+  } else {
+    section('#4d96ff', 'Controls', [
+      'Letters fall on their own. Move them with the',
+      'arrow keys or by swiping. Drop instantly with',
+      'space or a tap. Pause with P.',
+    ]);
+  }
+
+  drawButton(getHowToButton(), "LET'S PLAY", '#ff6b6b', '#ffd93d');
+}
+
+function drawMenuScreen() {
+  ctx.fillStyle = '#0c0c1a';
+  ctx.fillRect(0, 0, W, H);
+
+  // Falling background tiles
+  for (let t of menuTiles) {
+    t.y += t.speed * 0.016;
+    if (t.y > H + 40) { t.y = -40; t.x = Math.random() * W; }
+    drawLetterTile(t.x, t.y, t.letter, t.alpha, 0, t.size);
+  }
+
+  const cx = W / 2;
+  const cy = H / 2 - 40;
+
+  // Title with glow
+  ctx.save();
+  ctx.shadowColor = '#ffd93d';
+  ctx.shadowBlur = 20;
+
+  const titleGrad = ctx.createLinearGradient(cx - 150, cy - 40, cx + 150, cy + 10);
+  titleGrad.addColorStop(0, '#ff6b6b');
+  titleGrad.addColorStop(0.33, '#ffd93d');
+  titleGrad.addColorStop(0.66, '#6bcb77');
+  titleGrad.addColorStop(1, '#4d96ff');
+
+  ctx.fillStyle = titleGrad;
+  ctx.font = 'bold 48px "Segoe UI", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('WORDDROPS', cx, cy);
+  ctx.restore();
+
+  // Subtitle — brighter
+  ctx.fillStyle = '#888';
+  ctx.font = '14px "Segoe UI", sans-serif';
+  ctx.fillText('Where Tetris meets Scrabble', cx, cy + 40);
+
+  // Tap to start (pulsing)
+  const pulse = 0.5 + Math.sin(menuPulse * 3) * 0.3;
+  ctx.fillStyle = `rgba(255, 255, 255, ${pulse})`;
+  ctx.font = '18px "Segoe UI", sans-serif';
+  ctx.fillText('Tap to Start', cx, cy + 120);
+
+  // How to Play button
+  const hb = getMenuHowToButton();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+  drawRoundedRect(hb.x, hb.y, hb.w, hb.h, 8);
+  ctx.fill();
+  ctx.fillStyle = '#9a9ab5';
+  ctx.font = '14px "Segoe UI", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('How to Play', cx, hb.y + hb.h / 2);
+}
+
+function drawModeSelectScreen() {
+  ctx.fillStyle = '#0c0c1a';
+  ctx.fillRect(0, 0, W, H);
+
+  const cx = W / 2;
+  const stats = loadStats();
+
+  // Title
+  ctx.fillStyle = '#888';
+  ctx.font = '16px "Segoe UI", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Choose Your Mode', cx, H / 2 - 120);
+
+  const btns = getModeSelectButtons();
+  const today = getTodayString();
+  const playedToday = stats.dailyLastPlayed === today;
+
+  // Daily button
+  const dailyGrad1 = playedToday ? '#2a2a4a' : '#ff6b6b';
+  const dailyGrad2 = playedToday ? '#1a1a35' : '#ffd93d';
+  drawButton(btns.daily, '', dailyGrad1, dailyGrad2);
+
+  // Daily label + info
+  ctx.fillStyle = playedToday ? '#666' : '#fff';
+  ctx.font = 'bold 20px "Segoe UI", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(playedToday ? 'DAILY (PLAYED)' : 'DAILY', btns.daily.x + btns.daily.w/2, btns.daily.y + 28);
+
+  ctx.fillStyle = playedToday ? '#555' : 'rgba(255,255,255,0.7)';
+  ctx.font = '12px "Segoe UI", sans-serif';
+  if (stats.dailyStreak > 0) {
+    ctx.fillText(`Streak: ${stats.dailyStreak} day${stats.dailyStreak !== 1 ? 's' : ''}`, btns.daily.x + btns.daily.w/2, btns.daily.y + 50);
+  } else {
+    ctx.fillText('3-minute challenge, same puzzle for everyone', btns.daily.x + btns.daily.w/2, btns.daily.y + 50);
+  }
+
+  // NEW badge
+  if (!playedToday) {
+    ctx.fillStyle = '#ff4757';
+    ctx.font = 'bold 10px "Segoe UI", sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText('NEW', btns.daily.x + btns.daily.w - 12, btns.daily.y + 18);
+  }
+
+  // Freeplay button
+  drawButton(btns.freeplay, '', '#4d96ff', '#6bcb77');
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 20px "Segoe UI", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('FREEPLAY', btns.freeplay.x + btns.freeplay.w/2, btns.freeplay.y + 28);
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.font = '12px "Segoe UI", sans-serif';
+  const bestTxt = stats.freeplayBestScore > 0 ? `Best: ${stats.freeplayBestScore.toLocaleString()}` : 'Endless arcade mode';
+  ctx.fillText(bestTxt, btns.freeplay.x + btns.freeplay.w/2, btns.freeplay.y + 50);
+}
+
+function drawGameOverScreen() {
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+  ctx.fillRect(0, 0, W, H);
+
+  const cx = W / 2;
+  let y = H / 2 - 140;
+
+  // Title with glow
+  ctx.save();
+  ctx.shadowColor = '#ffd93d';
+  ctx.shadowBlur = 15;
+  const titleGrad = ctx.createLinearGradient(cx - 100, y, cx + 100, y + 30);
+  titleGrad.addColorStop(0, '#ff6b6b');
+  titleGrad.addColorStop(0.5, '#ffd93d');
+  titleGrad.addColorStop(1, '#6bcb77');
+  ctx.fillStyle = titleGrad;
+  ctx.font = 'bold 36px "Segoe UI", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  if (gameMode === 'daily') {
+    ctx.fillText(`Daily #${getDayNumber()}`, cx, y);
+  } else {
+    ctx.fillText('GAME OVER', cx, y);
+  }
+  ctx.restore();
+
+  // End-reason subtitle (Daily): distinguish a timed finish from a jammed board.
+  if (gameMode === 'daily' && dailyResult) {
+    const jammed = dailyResult.endReason === 'boardfull';
+    ctx.fillStyle = jammed ? '#ff6b6b' : '#888';
+    ctx.font = '14px "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(jammed ? 'Board full, no moves left' : "Time's up", cx, y + 22);
+  }
+
+  // Stats in rounded rect cards
+  y += 50;
+  ctx.font = '16px "Segoe UI", sans-serif';
+  const result = gameMode === 'daily' && dailyResult ? dailyResult : {
+    score: scoreVal, words: wordsFound, longest: longestWord,
+    bestChain: bestChain, lettersPlaced: totalLettersPlaced,
+    bestWord: bestWord, bestWordScore: bestWordScore, history: wordHistory
+  };
+
+  const lines = [
+    { label: 'Score', value: result.score.toLocaleString(), color: '#ffd93d' },
+    { label: 'Words Found', value: String(result.words), color: '#6bcb77' },
+    { label: 'Best Word', value: result.bestWord ? `${result.bestWord}  +${(result.bestWordScore || 0).toLocaleString()}` : (result.longest || 'None'), color: '#bc8cff' },
+    { label: 'Best Chain', value: result.bestChain + 'x', color: '#ff6b6b' },
+    { label: 'Letters Placed', value: String(result.lettersPlaced), color: '#4d96ff' },
+  ];
+
+  if (gameMode === 'daily') {
+    const stats = loadStats();
+    lines.push({ label: 'Streak', value: stats.dailyStreak + ' day' + (stats.dailyStreak !== 1 ? 's' : ''), color: '#ff9a3c' });
+  }
+
+  const cardW = Math.min(280, W - 40);
+  const cardH = 24;
+  for (let line of lines) {
+    // Card background
+    ctx.fillStyle = 'rgba(26, 26, 58, 0.6)';
+    drawRoundedRect(cx - cardW / 2, y - 14, cardW, cardH, 6);
+    ctx.fill();
+
+    ctx.fillStyle = '#666';
+    ctx.textAlign = 'right';
+    ctx.fillText(line.label + ':', cx - 10, y);
+    ctx.fillStyle = line.color;
+    ctx.textAlign = 'left';
+    ctx.fillText(line.value, cx + 10, y);
+    y += 29;
+  }
+
+  // Words found this run — a compact top-scorers line (§3.4). The data rides along in the
+  // persisted daily result and in wordHistory for Freeplay, so it shows on return visits too.
+  const history = (result.history || []).slice().sort((a, b) => b.score - a.score);
+  if (history.length) {
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#777';
+    ctx.font = '11px "Segoe UI", sans-serif';
+    ctx.fillText('WORDS FOUND', cx, y);
+    y += 16;
+    ctx.font = '13px "Segoe UI", sans-serif';
+    const sep = '   ';
+    const shown = [];
+    for (const h of history) {
+      const test = shown.length ? shown.join(sep) + sep + h.word : h.word;
+      if (shown.length && ctx.measureText(test).width > cardW - 30) break; // leave room for "+N"
+      shown.push(h.word);
+    }
+    const extra = history.length - shown.length;
+    ctx.fillStyle = '#9a9ab5';
+    ctx.fillText(shown.join(sep) + (extra > 0 ? sep + '+' + extra : ''), cx, y);
+    y += 10;
+  }
+
+  // Buttons
+  const btns = getGameOverButtons();
+
+  if (gameMode === 'daily') {
+    const stats = loadStats();
+    const today = getTodayString();
+    if (stats.dailyLastPlayed === today) {
+      drawButton(btns.playAgain, 'VIEW RESULTS', '#2a2a4a', '#1a1a35', '#888');
+    } else {
+      drawButton(btns.playAgain, 'PLAY AGAIN', '#ff6b6b', '#ffd93d');
+    }
+  } else {
+    drawButton(btns.playAgain, 'PLAY AGAIN', '#ff6b6b', '#ffd93d');
+  }
+  drawButton(btns.menu, 'BACK TO MENU', '#2a2a4a', '#1a1a35', '#aaa');
+
+  if (btns.share) {
+    drawButton(btns.share, 'COPY RESULTS', '#4d96ff', '#6bcb77');
+  }
+}
+
+function drawHUD() {
+  // Top bar background
+  ctx.fillStyle = 'rgba(12, 12, 26, 0.9)';
+  ctx.fillRect(0, 0, W, PADDING_Y - 5);
+
+  const y = 18;
+
+  if (gameMode === 'daily') {
+    // Score with glow
+    ctx.save();
+    ctx.shadowColor = '#ffd93d';
+    ctx.shadowBlur = 6;
+    ctx.fillStyle = '#ffd93d';
+    ctx.font = 'bold 20px "Segoe UI", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(Math.round(displayScore).toLocaleString(), 40, y);
+    ctx.restore();
+
+    // Timer
+    const mins = Math.floor(dailyTimer / 60);
+    const secs = Math.floor(dailyTimer % 60);
+    const timerStr = `${mins}:${String(secs).padStart(2, '0')}`;
+
+    // Timer color shifts in last 60s
+    if (dailyTimer <= 10) {
+      ctx.fillStyle = '#ff4757';
+      ctx.font = 'bold 24px "Segoe UI", sans-serif';
+    } else if (dailyTimer <= 30) {
+      ctx.fillStyle = '#ff6b6b';
+      ctx.font = 'bold 22px "Segoe UI", sans-serif';
+    } else if (dailyTimer <= 60) {
+      ctx.fillStyle = '#ffd93d';
+      ctx.font = 'bold 20px "Segoe UI", sans-serif';
+    } else {
+      ctx.fillStyle = '#aaa';
+      ctx.font = 'bold 20px "Segoe UI", sans-serif';
+    }
+    ctx.textAlign = 'center';
+    ctx.fillText(timerStr, W / 2, y);
+
+    // Words count
+    ctx.fillStyle = '#6bcb77';
+    ctx.font = '14px "Segoe UI", sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(`${wordsFound} words`, W - 15, y - 3);
+
+    // Timer progress bar
+    const barW = 120, barH = 3;
+    const barX = W / 2 - barW / 2, barY = y + 8;
+    const pct = dailyTimer / 180;
+    ctx.fillStyle = '#1a1a35';
+    ctx.fillRect(barX, barY, barW, barH);
+    const barColor = pct > 0.5 ? '#6bcb77' : pct > 0.2 ? '#ffd93d' : '#ff4757';
+    ctx.fillStyle = barColor;
+    ctx.fillRect(barX, barY, barW * pct, barH);
+
+    // Chain indicator — pulsing
+    if (chainCount > 0) {
+      const chainAlpha = 0.7 + Math.sin(glowTime * 5) * 0.3;
+      ctx.save();
+      ctx.globalAlpha = chainAlpha;
+      ctx.shadowColor = '#ff6b6b';
+      ctx.shadowBlur = 8;
+      ctx.fillStyle = '#ff6b6b';
+      ctx.font = 'bold 18px "Segoe UI", sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(`${chainCount + 1}x CHAIN`, 40, y + 18);
+      ctx.restore();
+    }
+  } else {
+    // Freeplay HUD
+    // Score
+    ctx.fillStyle = '#ffd93d';
+    ctx.font = 'bold 20px "Segoe UI", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(Math.round(displayScore).toLocaleString(), 40, y);
+
+    // Level
+    ctx.fillStyle = '#4d96ff';
+    ctx.font = '14px "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`Level ${level}`, W / 2, y);
+
+    // Words
+    ctx.fillStyle = '#6bcb77';
+    ctx.font = '14px "Segoe UI", sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(`${wordsFound} words`, W - 15, y);
+
+    // Chain
+    if (chainCount > 0) {
+      ctx.fillStyle = '#ff6b6b';
+      ctx.font = 'bold 14px "Segoe UI", sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(`${chainCount + 1}x CHAIN`, 40, y + 16);
+    }
+
+    // Next letters as mini tiles
+    const miniS = Math.floor(CELL * 0.55);
+    const nextBaseX = W - 15 - nextLetters.length * (miniS + 2);
+    ctx.fillStyle = '#555';
+    ctx.font = '9px "Segoe UI", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('NEXT', nextBaseX, y + 12);
+    for (let i = 0; i < nextLetters.length; i++) {
+      drawLetterTile(nextBaseX + i * (miniS + 2), y + 15, nextLetters[i], 1 - i * 0.15, 0, miniS);
+    }
+
+    // Hold as mini tile
+    if (heldLetter) {
+      ctx.fillStyle = '#555';
+      ctx.font = '9px "Segoe UI", sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('HOLD', 15, y + 12);
+      // Bordered box
+      ctx.strokeStyle = '#2a2a4a';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(14, y + 14, miniS + 4, miniS + 4);
+      drawLetterTile(16, y + 16, heldLetter, 1, 0, miniS);
+    }
+  }
+}
+
+function drawBoard() {
+  // Build set of highlighted cells for quick lookup
+  // Each entry: { glow, discovery } where discovery is 0-1 timer for new words
+  const highlightCells = new Map();
+  for (let hw of highlightedWords) {
+    let glowIntensity = hw.word.length >= 6 ? 1.0 : hw.word.length >= 5 ? 0.8 : 0.6;
+    // Boost glow for newly discovered words
+    if (hw.discoveryTimer > 0) glowIntensity = Math.min(1.0, glowIntensity + 0.4);
+    for (let cell of hw.cells) {
+      const key = `${cell.r},${cell.c}`;
+      const existing = highlightCells.get(key);
+      if (!existing || glowIntensity > existing.glow) {
+        highlightCells.set(key, { glow: glowIntensity, discovery: hw.discoveryTimer || 0 });
+      }
+    }
+  }
+
+  // Board outer border
+  ctx.strokeStyle = '#2a2a50';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(PADDING_X - 1, PADDING_Y - 1, COLS * CELL + 2, ROWS * CELL + 2);
+  ctx.lineWidth = 1;
+
+  // Grid cells
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const x = PADDING_X + c * CELL;
+      const y = PADDING_Y + r * CELL;
+
+      // Cell background
+      ctx.fillStyle = (r + c) % 2 === 0 ? '#101025' : '#0e0e20';
+      ctx.fillRect(x, y, CELL, CELL);
+      ctx.strokeStyle = '#222240';
+      ctx.strokeRect(x, y, CELL, CELL);
+
+      // Letter tile
+      const letter = board[r][c];
+      if (letter) {
+        const key = `${r},${c}`;
+        const hlInfo = highlightCells.get(key);
+        const glow = hlInfo ? hlInfo.glow : 0;
+        // Subtle bob on non-glowing tiles
+        const bob = glow ? 0 : Math.sin(glowTime * 1.5 + r * 7 + c * 13) * 0.8;
+        drawLetterTile(x, y + bob, letter, 1, glow);
+        // Discovery flash — bright white overlay that fades out
+        if (hlInfo && hlInfo.discovery > 0) {
+          const flashAlpha = hlInfo.discovery * 0.35;
+          ctx.save();
+          ctx.globalAlpha = flashAlpha;
+          ctx.fillStyle = '#fff';
+          drawRoundedRect(x + 2, y + 2 + bob, CELL - 4, CELL - 4, Math.max(3, CELL * 0.08));
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+    }
+  }
+
+  // Daily mode: column highlight when hovering
+  if (gameMode === 'daily' && hoveredCol >= 0 && state === 'playing') {
+    const x = PADDING_X + hoveredCol * CELL;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+    ctx.fillRect(x, PADDING_Y, CELL, ROWS * CELL);
+
+    // Ghost letter position
+    let ghostRow = -1;
+    for (let r = ROWS - 1; r >= 0; r--) {
+      if (board[r][hoveredCol] === null) { ghostRow = r; break; }
+    }
+    if (ghostRow >= 0 && dailyLetter) {
+      drawLetterTile(x, PADDING_Y + ghostRow * CELL, dailyLetter, 0.3);
+    }
+  }
+
+  // Daily mode: current letter + upcoming queue
+  if (gameMode === 'daily' && dailyLetter && state === 'playing') {
+    const bigSize = Math.floor(CELL * 1.5);
+    const bounce = Math.sin(glowTime * 2.5) * 2;
+    const lx = W / 2 - bigSize / 2;
+    const ly = PADDING_Y - bigSize - 12 + bounce;
+
+    // Glow ring behind current letter
+    ctx.save();
+    ctx.shadowColor = getLetterColor(dailyLetter);
+    ctx.shadowBlur = 18 + Math.sin(glowTime * 3) * 6;
+    ctx.beginPath();
+    ctx.arc(W / 2, ly + bigSize / 2, bigSize / 2 + 4, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(255, 217, 61, ${0.3 + Math.sin(glowTime * 3) * 0.15})`;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.restore();
+
+    drawLetterTile(lx, ly, dailyLetter, 1, 0, bigSize);
+
+    // "DROP" label
+    ctx.fillStyle = '#aaa';
+    ctx.font = 'bold 13px "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('DROP', W / 2, ly - 6);
+
+    // Upcoming queue — mini tiles to the right
+    if (dailyQueue.length > 0) {
+      const miniSize = Math.floor(CELL * 0.65);
+      const queueStartX = W / 2 + bigSize / 2 + 14;
+      const queueY = ly + (bigSize - miniSize) / 2;
+
+      ctx.fillStyle = '#555';
+      ctx.font = '9px "Segoe UI", sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('NEXT', queueStartX, queueY - 4);
+
+      for (let i = 0; i < dailyQueue.length; i++) {
+        const fadeAlpha = 1 - i * 0.15;
+        drawLetterTile(queueStartX + i * (miniSize + 3), queueY, dailyQueue[i], fadeAlpha, 0, miniSize);
+      }
+    }
+  }
+
+  // Freeplay: ghost + current falling letter
+  if (gameMode === 'freeplay' && currentLetter && state === 'playing') {
+    // Ghost
+    let ghostY = letterY;
+    while (ghostY + 1 < ROWS && board[ghostY + 1][letterX] === null) ghostY++;
+    if (ghostY !== letterY) {
+      drawLetterTile(PADDING_X + letterX * CELL, PADDING_Y + ghostY * CELL, currentLetter, 0.2);
+    }
+    // Current
+    drawLetterTile(PADDING_X + letterX * CELL, PADDING_Y + letterY * CELL, currentLetter, 1);
+  }
+
+  // Danger zone — driven by real death proximity (getDeathProximity), the same signal the
+  // ambient "danger" audio uses, so the red glow and the scary sound both agree with when
+  // you actually top out (Freeplay) or jam the board (Daily).
+  const danger = getDeathProximity();
+  if (danger > 0) {
+    const dangerAlpha = danger * 0.35;
+    for (let r = 0; r < 3; r++) {
+      ctx.fillStyle = `rgba(255, 60, 60, ${dangerAlpha * (3 - r) / 3})`;
+      ctx.fillRect(PADDING_X, PADDING_Y + r * CELL, COLS * CELL, CELL);
+    }
+  }
+}
+
+function drawLetterTile(x, y, letter, alpha, glowIntensity, size) {
+  const s = size || CELL;
+  const color = getLetterColor(letter);
+  const pts = LETTER_POOL[letter].pts;
+  const pad = 2;
+  const r = Math.max(3, s * 0.08); // corner radius
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+
+  // Glow effect for highlighted words
+  if (glowIntensity) {
+    const glowPulse = 0.5 + Math.sin(glowTime * 4) * 0.3;
+    const glowAlpha = glowIntensity * glowPulse * alpha;
+
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 15 + glowIntensity * 10;
+
+    drawRoundedRect(x + pad, y + pad, s - pad * 2, s - pad * 2, r);
+    ctx.strokeStyle = `rgba(255, 255, 255, ${glowAlpha})`;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+
+    // Breathing scale
+    const breathe = 1.0 + Math.sin(glowTime * 4) * 0.02;
+    const cx = x + s / 2, cy = y + s / 2;
+    ctx.translate(cx, cy);
+    ctx.scale(breathe, breathe);
+    ctx.translate(-cx, -cy);
+  }
+
+  // Tile background — radial gradient
+  const cx = x + s * 0.4, cy = y + s * 0.35;
+  const grad = ctx.createRadialGradient(cx, cy, 0, x + s / 2, y + s / 2, s * 0.75);
+  grad.addColorStop(0, lightenColor(color, 50));
+  grad.addColorStop(0.6, color);
+  grad.addColorStop(1, darkenColor(color, 30));
+
+  drawRoundedRect(x + pad, y + pad, s - pad * 2, s - pad * 2, r);
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Bottom edge shadow
+  ctx.fillStyle = darkenColor(color, 50);
+  ctx.fillRect(x + pad + r, y + s - pad - 2, s - pad * 2 - r * 2, 2);
+
+  // Specular highlight — upper-left arc
+  ctx.save();
+  ctx.globalAlpha = 0.35 * alpha;
+  ctx.beginPath();
+  ctx.ellipse(x + s * 0.38, y + s * 0.28, s * 0.25, s * 0.15, -0.3, 0, Math.PI * 2);
+  ctx.fillStyle = '#fff';
+  ctx.fill();
+  ctx.restore();
+
+  // Letter text with shadow
+  ctx.shadowColor = 'rgba(0,0,0,0.5)';
+  ctx.shadowBlur = 2;
+  ctx.shadowOffsetY = 1;
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold ${Math.floor(s * 0.45)}px "Segoe UI", sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(letter, x + s / 2, y + s / 2 - 1);
+  ctx.shadowColor = 'transparent';
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+
+  // Point value
+  ctx.font = `${Math.floor(s * 0.2)}px sans-serif`;
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.textAlign = 'right';
+  ctx.fillText(pts, x + s - pad - 2, y + s - pad - 3);
+
+  ctx.restore();
+}
+
+function drawParticles() {
+  for (let p of particles) {
+    ctx.globalAlpha = Math.max(0, p.life * 1.5);
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ============================================================
+// SOUND ENGINE — Oscillator-based, no external dependencies
+// ============================================================
+
+const GAMELAB_MUTED = new URLSearchParams(window.location.search).has('mute');
+let audioCtx = null;
+let soundEnabled = STORAGE.get('sound') !== 'off';
+let audioUnlocked = false;
+
+function getAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended' && !GAMELAB_MUTED) audioCtx.resume();
+  return audioCtx;
+}
+
+function unlockAudio() {
+  if (audioUnlocked) return;
+  const c = getAudioCtx();
+  const buf = c.createBuffer(1, 1, 22050);
+  const src = c.createBufferSource();
+  src.buffer = buf;
+  src.connect(c.destination);
+  src.start(0);
+  audioUnlocked = true;
+}
+
+// Pentatonic scale — column-to-pitch mapping
+const WD_NOTES = [261.6, 293.7, 329.6, 392.0, 440.0, 523.3, 587.3, 659.3];
+
+// Word length → base frequency
+const WORD_FREQ = { 3: 261.6, 4: 329.6, 5: 392.0, 6: 523.3, 7: 659.3 };
+function wordBaseFreq(len) { return WORD_FREQ[Math.min(len, 7)] || 659.3; }
+
+// Noise buffer — created once, reused for transient clicks
+let _noiseBuf = null;
+function getNoiseBuffer(c) {
+  if (_noiseBuf) return _noiseBuf;
+  _noiseBuf = c.createBuffer(1, 2048, c.sampleRate);
+  const data = _noiseBuf.getChannelData(0);
+  for (let i = 0; i < 2048; i++) data[i] = Math.random() * 2 - 1;
+  return _noiseBuf;
+}
+
+// ── Shared helpers ──────────────────────────────────────────
+
+function playTone(freq, opts = {}) {
+  if (!soundEnabled) return;
+  const c = getAudioCtx();
+  const now = c.currentTime;
+  const { type = 'sine', gain = 0.10, attack = 0.005, decay = 1.0, detune = 0 } = opts;
+  const g = c.createGain();
+  g.gain.setValueAtTime(0, now);
+  g.gain.linearRampToValueAtTime(gain, now + attack);
+  g.gain.exponentialRampToValueAtTime(0.001, now + decay);
+  g.connect(c.destination);
+  const osc = c.createOscillator();
+  osc.type = type;
+  osc.frequency.value = freq;
+  if (detune) osc.detune.value = detune;
+  osc.connect(g);
+  osc.start(now);
+  osc.stop(now + decay + 0.05);
+}
+
+function playChime(freq, len = 1.2, gain = 0.12) {
+  if (!soundEnabled) return;
+  const c = getAudioCtx();
+  const now = c.currentTime;
+  // Fundamental
+  const master = c.createGain();
+  master.gain.setValueAtTime(0, now);
+  master.gain.linearRampToValueAtTime(gain, now + 0.006);
+  master.gain.exponentialRampToValueAtTime(0.001, now + len);
+  master.connect(c.destination);
+  const osc1 = c.createOscillator();
+  osc1.type = 'sine'; osc1.frequency.value = freq;
+  osc1.connect(master); osc1.start(now); osc1.stop(now + len + 0.05);
+  // Shimmer harmonic
+  const g2 = c.createGain(); g2.gain.value = 0.25; g2.connect(master);
+  const osc2 = c.createOscillator();
+  osc2.type = 'sine'; osc2.frequency.value = freq * 2.005;
+  osc2.connect(g2); osc2.start(now); osc2.stop(now + len * 0.7 + 0.05);
+  // Sub-octave (mobile speaker presence)
+  const g3 = c.createGain(); g3.gain.value = 0.08; g3.connect(master);
+  const osc3 = c.createOscillator();
+  osc3.type = 'sine'; osc3.frequency.value = freq * 0.5;
+  osc3.connect(g3); osc3.start(now); osc3.stop(now + len * 0.5 + 0.05);
+  // Simulated reverb tail
+  const reverbG = c.createGain();
+  reverbG.gain.setValueAtTime(0, now + 0.03);
+  reverbG.gain.linearRampToValueAtTime(gain * 0.15, now + 0.04);
+  reverbG.gain.exponentialRampToValueAtTime(0.001, now + len * 1.8);
+  const lp = c.createBiquadFilter();
+  lp.type = 'lowpass'; lp.frequency.value = freq * 1.2;
+  lp.connect(reverbG); reverbG.connect(c.destination);
+  const osc4 = c.createOscillator();
+  osc4.type = 'sine'; osc4.frequency.value = freq;
+  osc4.connect(lp); osc4.start(now + 0.03); osc4.stop(now + len * 1.8 + 0.05);
+}
+
+function playNoiseBurst(centerFreq = 1200, gain = 0.08, duration = 0.04) {
+  if (!soundEnabled) return;
+  const c = getAudioCtx();
+  const now = c.currentTime;
+  const src = c.createBufferSource();
+  src.buffer = getNoiseBuffer(c);
+  const bp = c.createBiquadFilter();
+  bp.type = 'bandpass'; bp.frequency.value = centerFreq; bp.Q.value = 1.5;
+  const g = c.createGain();
+  g.gain.setValueAtTime(gain, now);
+  g.gain.exponentialRampToValueAtTime(0.001, now + duration);
+  src.connect(bp); bp.connect(g); g.connect(c.destination);
+  src.start(now); src.stop(now + duration + 0.01);
+}
+
+// ── Game Sound Events ───────────────────────────────────────
+
+// §3.3 "Not a word" cue — a dull low descending buzz + noise thud.
+// Deliberately unmusical (vs. the pentatonic land/clear tones) so it reads as "nope".
+function playNotWordSound() {
+  if (!soundEnabled) return;
+  playNoiseBurst(200, 0.05, 0.08);
+  const c = getAudioCtx();
+  const now = c.currentTime;
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.06, now);
+  g.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+  g.connect(c.destination);
+  const osc = c.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(180, now);
+  osc.frequency.exponentialRampToValueAtTime(90, now + 0.14);
+  osc.connect(g); osc.start(now); osc.stop(now + 0.16);
+}
+
+function sfxLetterLand(col) {
+  if (!soundEnabled) return;
+  const freq = WD_NOTES[Math.min(col, 7)];
+  const c = getAudioCtx();
+  const now = c.currentTime;
+  const bp = c.createBiquadFilter();
+  bp.type = 'bandpass'; bp.frequency.value = freq; bp.Q.value = 3.5;
+  bp.connect(c.destination);
+  const g = c.createGain();
+  g.gain.setValueAtTime(0, now);
+  g.gain.linearRampToValueAtTime(0.07, now + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+  g.connect(bp);
+  const osc = c.createOscillator();
+  osc.type = 'triangle'; osc.frequency.value = freq;
+  osc.connect(g); osc.start(now); osc.stop(now + 0.07);
+  playTone(freq * 0.5, { gain: 0.04, attack: 0.005, decay: 0.05 });
+}
+
+function sfxWordHighlight() {
+  if (!soundEnabled) return;
+  [261.6, 329.6, 392.0].forEach((f, i) => {
+    setTimeout(() => playTone(f, { gain: 0.04, attack: 0.02, decay: 0.6 }), i * 60);
+  });
+}
+
+function sfxWordClear(wordLen, chainDepth = 0) {
+  if (!soundEnabled) return;
+  const semitones = Math.min(chainDepth * 2, 6);
+  const baseFreq = wordBaseFreq(wordLen) * Math.pow(2, semitones / 12);
+  const dur = 0.7 + (wordLen - 3) * 0.25;
+  const gain = 0.12 + Math.min(chainDepth * 0.015, 0.04);
+  playChime(baseFreq, dur, gain);
+  if (navigator.vibrate) {
+    navigator.vibrate(wordLen >= 6 ? [30, 10, 30, 10, 50] : [20, 10, 30]);
+  }
+}
+
+function sfxChainContinue(depth) {
+  if (depth > 1) playNoiseBurst(800 + depth * 200, 0.06, 0.04);
+}
+
+function sfxLevelUp() {
+  if (!soundEnabled) return;
+  [392.0, 523.3, 659.3].forEach((f, i) => {
+    setTimeout(() => playTone(f, { gain: 0.10, attack: 0.005, decay: 0.5 }), i * 90);
+  });
+}
+
+function sfxGameOver() {
+  if (!soundEnabled) return;
+  [261.6, 196.0, 130.8].forEach((f, i) => {
+    setTimeout(() => playChime(f, 2.0, 0.08), i * 400);
+  });
+}
+
+function sfxPersonalBest() {
+  if (!soundEnabled) return;
+  WD_NOTES.slice(0, 6).forEach((f, i) => {
+    setTimeout(() => {
+      playChime(f, i === 5 ? 2.0 : 0.5, i === 5 ? 0.14 : 0.09);
+      if (i === 5) playTone(f * 7.1, { gain: 0.04, attack: 0.01, decay: 1.5 });
+    }, i * 80);
+  });
+}
+
+// ── Ambient Engine ──────────────────────────────────────────
+// Continuous drone, state-driven. Gains reduced ~60% from spec.
+const WD_AMBIENT = {
+  _ctx: null, _osc: null, _osc2: null, _lp: null, _masterGain: null,
+  _state: 'silent',
+  _configs: {
+    calm:     [60, 400,  0.025, 0.5],
+    building: [65, 700,  0.035, 1.0],
+    tense:    [58, 350,  0.05,  2.5],
+    danger:   [55, 250,  0.07,  5.0],
+    release:  [80, 2000, 0.02,  0.3],
+    silent:   [60, 400,  0.00,  0.5],
+  },
+  start() {
+    if (!soundEnabled || this._masterGain) return;
+    const c = getAudioCtx(); this._ctx = c;
+    this._masterGain = c.createGain(); this._masterGain.gain.value = 0;
+    this._masterGain.connect(c.destination);
+    this._lp = c.createBiquadFilter();
+    this._lp.type = 'lowpass'; this._lp.frequency.value = 400; this._lp.Q.value = 0.8;
+    this._lp.connect(this._masterGain);
+    this._osc = c.createOscillator(); this._osc.type = 'sine'; this._osc.frequency.value = 60;
+    this._osc.connect(this._lp); this._osc.start();
+    this._osc2 = c.createOscillator(); this._osc2.type = 'sine'; this._osc2.frequency.value = 60.5;
+    const g2 = c.createGain(); g2.gain.value = 0.4;
+    this._osc2.connect(g2); g2.connect(this._lp); this._osc2.start();
+  },
+  setState(newState) {
+    if (!soundEnabled || newState === this._state) return;
+    if (!this._masterGain) this.start();
+    if (!this._masterGain) return;
+    this._state = newState;
+    const [freq, cutoff, gain, detuneHz] = this._configs[newState] || this._configs.calm;
+    const now = this._ctx.currentTime;
+    const tc = 0.5;
+    this._osc.frequency.setTargetAtTime(freq, now, tc);
+    this._osc2.frequency.setTargetAtTime(freq + detuneHz, now, tc);
+    this._lp.frequency.setTargetAtTime(cutoff, now, tc);
+    this._masterGain.gain.setTargetAtTime(gain, now, tc);
+  },
+  stop() { this.setState('silent'); }
+};
+
+function getBoardFillPct() {
+  let filled = 0, total = COLS * ROWS;
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++)
+      if (board[r][c] !== null) filled++;
+  return filled / total;
+}
+
+// Topmost filled row in a column (small number = stacked near the top), or ROWS if empty.
+function columnStackTop(col) {
+  for (let r = 0; r < ROWS; r++) if (board[r][col] !== null) return r;
+  return ROWS;
+}
+
+// 0..1 proximity to the REAL death condition, so the danger cues can line up with it.
+// Freeplay tops out when the center spawn column blocks row 0 → watch that column.
+// Daily jams when every column is full → watch the emptiest column (where you'd still drop).
+const DANGER_ROWS = 3;
+function getDeathProximity() {
+  if (state !== 'playing') return 0;
+  let watchTop;
+  if (gameMode === 'freeplay') {
+    watchTop = columnStackTop(Math.floor(COLS / 2));
+  } else {
+    watchTop = 0;
+    for (let c = 0; c < COLS; c++) watchTop = Math.max(watchTop, columnStackTop(c));
+  }
+  if (watchTop <= 0) return 1;
+  return Math.max(0, (DANGER_ROWS - watchTop) / DANGER_ROWS);
+}
+
+function updateAmbientFromBoard() {
+  // Danger audio keys off real death proximity (the same signal as the red gradient) so the
+  // scariest sound lines up with actually being about to lose. calm→tense still tracks
+  // overall board fill as general escalation.
+  if (getDeathProximity() >= 0.5) { WD_AMBIENT.setState('danger'); return; }
+  const pct = getBoardFillPct();
+  if (pct < 0.30) WD_AMBIENT.setState('calm');
+  else if (pct < 0.60) WD_AMBIENT.setState('building');
+  else WD_AMBIENT.setState('tense');
+}
+
+function triggerReleaseAmbient() {
+  WD_AMBIENT.setState('release');
+  setTimeout(() => updateAmbientFromBoard(), 1200);
+}
+
+// Sound toggle
+function toggleSound() {
+  soundEnabled = !soundEnabled;
+  STORAGE.set('sound', soundEnabled ? 'on' : 'off');
+  if (!soundEnabled) WD_AMBIENT.stop();
+  else if (state === 'playing') { WD_AMBIENT.start(); updateAmbientFromBoard(); }
+}
+
+// ── Pause ──────────────────────────────────────────────────
+// Freezing is automatic: the Daily timer and Freeplay auto-drop only advance inside the
+// 'playing' branch of the game loop, so switching to 'paused' stops both. gameLoop keeps
+// updating lastTime each frame, so resuming produces a normal dt (no jump). We only need to
+// silence the ambient drone and restore it.
+function togglePause() {
+  if (state === 'playing') {
+    state = 'paused';
+    WD_AMBIENT.stop();
+  } else if (state === 'paused') {
+    state = 'playing';
+    updateAmbientFromBoard();
+  }
+}
+
+function drawSoundIcon(x, y, size) {
+  ctx.save();
+  ctx.strokeStyle = soundEnabled ? '#888' : '#555';
+  ctx.fillStyle = soundEnabled ? '#888' : '#555';
+  ctx.lineWidth = 1.5;
+  ctx.lineCap = 'round';
+  // Speaker body
+  const s = size;
+  ctx.beginPath();
+  ctx.moveTo(x + s * 0.15, y + s * 0.35);
+  ctx.lineTo(x + s * 0.35, y + s * 0.35);
+  ctx.lineTo(x + s * 0.55, y + s * 0.15);
+  ctx.lineTo(x + s * 0.55, y + s * 0.85);
+  ctx.lineTo(x + s * 0.35, y + s * 0.65);
+  ctx.lineTo(x + s * 0.15, y + s * 0.65);
+  ctx.closePath();
+  ctx.fill();
+  if (soundEnabled) {
+    // Sound waves
+    ctx.beginPath();
+    ctx.arc(x + s * 0.55, y + s * 0.5, s * 0.18, -0.6, 0.6);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x + s * 0.55, y + s * 0.5, s * 0.32, -0.5, 0.5);
+    ctx.stroke();
+  } else {
+    // Mute X
+    ctx.beginPath();
+    ctx.moveTo(x + s * 0.65, y + s * 0.3);
+    ctx.lineTo(x + s * 0.9, y + s * 0.7);
+    ctx.moveTo(x + s * 0.9, y + s * 0.3);
+    ctx.lineTo(x + s * 0.65, y + s * 0.7);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Pause button — top-left corner. Generous hit region (see handleClick) for touch.
+const PAUSE_BTN = { x: 8, y: 5, s: 22 };
+function drawPauseButton() {
+  const b = PAUSE_BTN;
+  ctx.save();
+  ctx.fillStyle = '#888';
+  if (state === 'paused') {
+    // Play triangle = resume
+    ctx.beginPath();
+    ctx.moveTo(b.x + b.s * 0.30, b.y + b.s * 0.20);
+    ctx.lineTo(b.x + b.s * 0.30, b.y + b.s * 0.80);
+    ctx.lineTo(b.x + b.s * 0.82, b.y + b.s * 0.50);
+    ctx.closePath();
+    ctx.fill();
+  } else {
+    // Two bars = pause
+    const bw = b.s * 0.20;
+    ctx.fillRect(b.x + b.s * 0.28, b.y + b.s * 0.22, bw, b.s * 0.56);
+    ctx.fillRect(b.x + b.s * 0.54, b.y + b.s * 0.22, bw, b.s * 0.56);
+  }
+  ctx.restore();
+}
+
+function drawPauseOverlay() {
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.78)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.save();
+  ctx.shadowColor = '#4d96ff';
+  ctx.shadowBlur = 15;
+  ctx.fillStyle = '#ffd93d';
+  ctx.font = 'bold 34px "Segoe UI", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('PAUSED', W / 2, H / 2 - 12);
+  ctx.restore();
+  ctx.fillStyle = '#888';
+  ctx.font = '15px "Segoe UI", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Press P or tap to resume', W / 2, H / 2 + 28);
+}
+
+let ambientUpdateCounter = 0;
+
+// ── Game Loop ──────────────────────────────────────────────
+function gameLoop(time) {
+  const dt = Math.min(time - lastTime, 200);
+  lastTime = time;
+  const dtSec = dt / 1000;
+
+  glowTime += dtSec;
+  menuPulse += dtSec;
+
+  // Clear with subtle animated radial gradient
+  ctx.fillStyle = '#0c0c1a';
+  ctx.fillRect(0, 0, W, H);
+  const bgAlpha = 0.03 + Math.sin(glowTime * 0.5) * 0.015;
+  const bgGrad = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, W * 0.7);
+  bgGrad.addColorStop(0, `rgba(77, 150, 255, ${bgAlpha})`);
+  bgGrad.addColorStop(1, 'transparent');
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  if (state === 'howto') {
+    drawHowToScreen();
+    requestAnimationFrame(gameLoop);
+    return;
+  }
+
+  if (state === 'menu') {
+    drawMenuScreen();
+    drawSoundIcon(W - 34, 4, 24);
+    requestAnimationFrame(gameLoop);
+    return;
+  }
+
+  if (state === 'mode_select') {
+    drawModeSelectScreen();
+    drawSoundIcon(W - 34, 4, 24);
+    requestAnimationFrame(gameLoop);
+    return;
+  }
+
+  if (state === 'game_over') {
+    // Draw board in background
+    drawBoard();
+    drawParticles();
+    drawGameOverScreen();
+    drawSoundIcon(W - 34, 4, 24);
+    requestAnimationFrame(gameLoop);
+    return;
+  }
+
+  if (state === 'paused') {
+    // Draw the frozen board + HUD under the overlay. No timer/drop/particle updates run,
+    // so everything is held in place until resume.
+    drawBoard();
+    drawParticles();
+    drawHUD();
+    drawPauseOverlay();
+    drawSoundIcon(W - 34, 4, 24);
+    drawPauseButton();
+    requestAnimationFrame(gameLoop);
+    return;
+  }
+
+  // ── Playing state ──
+  if (state === 'playing') {
+    // Daily timer
+    if (gameMode === 'daily' && dailyTimerActive) {
+      dailyTimer -= dtSec;
+      if (dailyTimer <= 0) {
+        dailyTimer = 0;
+        endGame();
+        requestAnimationFrame(gameLoop);
+        return;
+      }
+    }
+
+    // Freeplay: auto-drop
+    if (gameMode === 'freeplay' && !clearingAnimation) {
+      dropTimer += dt;
+      if (dropTimer >= dropInterval) {
+        dropTimer = 0;
+        if (letterY + 1 < ROWS && board[letterY + 1][letterX] === null) {
+          letterY++;
+        } else {
+          placeFreeplayLetter();
+        }
+      }
+    }
+
+    // Score count-up tween (§3.2)
+    if (displayScore !== scoreVal) {
+      displayScore += (scoreVal - displayScore) * Math.min(1, dtSec * 9);
+      if (Math.abs(scoreVal - displayScore) < 0.5) displayScore = scoreVal;
+    }
+
+    // Update "not a word" feedback
+    if (notWordFeedback) {
+      notWordFeedback.timer -= dtSec;
+      if (notWordFeedback.timer <= 0) notWordFeedback = null;
+    }
+
+    // Update particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx * dtSec;
+      p.y += p.vy * dtSec;
+      p.vy += 100 * dtSec;
+      p.life -= dtSec;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+
+    // Decay discovery timers on highlighted words
+    for (let hw of highlightedWords) {
+      if (hw.discoveryTimer > 0) hw.discoveryTimer = Math.max(0, hw.discoveryTimer - dtSec);
+    }
+
+    // Update ambient every ~30 frames
+    ambientUpdateCounter++;
+    if (ambientUpdateCounter >= 30) {
+      ambientUpdateCounter = 0;
+      updateAmbientFromBoard();
+    }
+
+    drawBoard();
+    drawParticles();
+
+    // "Not a word" floating feedback
+    if (notWordFeedback) {
+      const nf = notWordFeedback;
+      const rise = (1 - nf.timer) * 30;
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, nf.timer * 2);
+      ctx.fillStyle = '#ff6b6b';
+      ctx.font = 'bold 13px "Segoe UI", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Not a word', nf.x, nf.y - rise);
+      ctx.restore();
+    }
+
+    drawHUD();
+
+    // Sound icon (drawn on top of everything, always visible during play)
+    drawSoundIcon(W - 34, 4, 24);
+    drawPauseButton();
+  }
+
+  requestAnimationFrame(gameLoop);
+}
+
+// ── Start ──────────────────────────────────────────────────
+lastTime = performance.now();
+requestAnimationFrame(gameLoop);
+
+</script>
+</body>
+</html>

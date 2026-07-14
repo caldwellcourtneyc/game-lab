@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Game Lab</title>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #070710;
+      color: #e0e0ff;
+      font-family: 'Share Tech Mono', monospace;
+      min-height: 100vh;
+      padding: 32px 16px 64px;
+      background-image:
+        repeating-linear-gradient(
+          0deg,
+          transparent,
+          transparent 2px,
+          rgba(0,0,0,0.15) 2px,
+          rgba(0,0,0,0.15) 4px
+        );
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+
+    header h1 {
+      font-family: 'Press Start 2P', monospace;
+      font-size: clamp(1.2rem, 5vw, 2rem);
+      color: #fff;
+      text-shadow:
+        0 0 10px #c060ff,
+        0 0 30px #c060ff,
+        0 0 60px #8030cc;
+      letter-spacing: 2px;
+      line-height: 1.5;
+    }
+
+    header p {
+      margin-top: 14px;
+      font-size: 0.8rem;
+      color: #c060ff;
+      text-shadow: 0 0 8px #c060ff;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+    }
+
+    .divider {
+      width: 200px;
+      height: 1px;
+      background: linear-gradient(to right, transparent, #c060ff, transparent);
+      margin: 20px auto 0;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 12px;
+      max-width: 760px;
+      margin: 0 auto;
+    }
+
+    .card {
+      background: #0e0e20;
+      border: 1px solid #3a2060;
+      border-radius: 4px;
+      padding: 18px 14px;
+      text-decoration: none;
+      color: inherit;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      transition: all 0.15s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(to right, #c060ff, #60c0ff);
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+
+    .card:hover {
+      background: #15152a;
+      border-color: #c060ff;
+      box-shadow: 0 0 16px rgba(192, 96, 255, 0.3), inset 0 0 20px rgba(192, 96, 255, 0.05);
+      transform: translateY(-2px);
+    }
+
+    .card:hover::before {
+      opacity: 1;
+    }
+
+    .card-name {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.85rem;
+      color: #e0d0ff;
+      line-height: 1.4;
+      text-shadow: 0 0 8px rgba(192, 96, 255, 0.4);
+    }
+
+    .card:hover .card-name {
+      color: #fff;
+      text-shadow: 0 0 10px #c060ff;
+    }
+
+    .card-variants {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .variant-link {
+      font-family: 'Press Start 2P', monospace;
+      font-size: 0.5rem;
+      background: transparent;
+      border: 1px solid #3a2060;
+      border-radius: 2px;
+      padding: 4px 7px;
+      color: #8060aa;
+      text-decoration: none;
+      letter-spacing: 1px;
+      transition: all 0.15s;
+    }
+
+    .variant-link:hover {
+      border-color: #c060ff;
+      color: #c060ff;
+      text-shadow: 0 0 6px #c060ff;
+      box-shadow: 0 0 8px rgba(192, 96, 255, 0.3);
+    }
+
+    /* Featured section */
+    .featured-label {
+      max-width: 760px;
+      margin: 0 auto 12px;
+      font-family: 'Press Start 2P', monospace;
+      font-size: 0.6rem;
+      color: #c060ff;
+      text-shadow: 0 0 8px #c060ff;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+    }
+
+    .featured-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 12px;
+      max-width: 760px;
+      margin: 0 auto 32px;
+    }
+
+    .card.featured {
+      border-color: #c060ff;
+      background: #12102a;
+      box-shadow: 0 0 12px rgba(192, 96, 255, 0.2), inset 0 0 30px rgba(192, 96, 255, 0.05);
+    }
+
+    .card.featured::before {
+      opacity: 1;
+    }
+
+    .card.featured .card-name {
+      color: #fff;
+      text-shadow: 0 0 10px #c060ff;
+    }
+
+    .card.featured:hover {
+      box-shadow: 0 0 24px rgba(192, 96, 255, 0.4), inset 0 0 30px rgba(192, 96, 255, 0.08);
+    }
+
+    .section-divider {
+      width: 200px;
+      height: 1px;
+      background: linear-gradient(to right, transparent, #3a2060, transparent);
+      margin: 0 auto 24px;
+    }
+
+    .card-date {
+      font-size: 0.6rem;
+      color: #5a5080;
+      letter-spacing: 0.5px;
+      margin-top: auto;
+    }
+
+    @media (max-width: 380px) {
+      .grid { grid-template-columns: 1fr 1fr; }
+      .featured-grid { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>GAME LAB</h1>
+    <p>Insert Coin</p>
+    <div class="divider"></div>
+  </header>
+
+  <div class="featured-grid">
+
+    <a class="card featured" href="glowflow.html">
+      <div class="card-name">Glowflow</div>
+    </a>
+
+    <a class="card featured" href="orbital-impact.html">
+      <div class="card-name">Orbital Impact</div>
+    </a>
+
+    <a class="card featured" href="word-drops.html">
+      <div class="card-name">Word Drops</div>
+    </a>
+
+    <a class="card featured" href="chain-reaction.html">
+      <div class="card-name">Chain Reaction</div>
+    </a>
+
+  </div>
+
+  <script>
+    // Fetch last-updated dates from GitHub API (per-file, parallel)
+    (async () => {
+      const REPO = 'caldwellcourtneyc/game-lab';
+      const cards = document.querySelectorAll('.card[href]');
+
+      try {
+        const fetches = [...cards].map(async card => {
+          const file = card.getAttribute('href');
+          const res = await fetch(
+            `https://api.github.com/repos/${REPO}/commits?path=${file}&per_page=1`
+          );
+          if (!res.ok) return;
+          const [commit] = await res.json();
+          if (!commit) return;
+          const d = new Date(commit.commit.author.date);
+          const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          const el = document.createElement('div');
+          el.className = 'card-date';
+          el.textContent = label;
+          card.appendChild(el);
+        });
+        await Promise.all(fetches);
+      } catch (e) { /* silent fail — dates are nice-to-have */ }
+    })();
+  </script>
+
+</body>
+</html>
